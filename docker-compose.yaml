@@ -8,7 +8,8 @@ services:
     volumes:
       - ./:/app
     ports:
-      - "8501:8501"
+      - "8501:8501" # jupyter
+      - "8502:8502" # streamlit
     environment:
       - PYTHONUNBUFFERED=1
 

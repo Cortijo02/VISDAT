@@ -30,3 +30,4 @@ EXPOSE 8501
 CMD ["sleep", "infinity"]
 # CMD ["streamlit", "run", "app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
 # jupyter notebook --ip=0.0.0.0 --port=8501 --no-browser --allow-root --NotebookApp.token='' --NotebookApp.password=''
+# streamlit run app/src/streamlit/eicu_patient_dashboard.py
