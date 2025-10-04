@@ -209,7 +209,8 @@ __marimo__/
 # data
 app/db/csv_clean
 app/db/csv/nurseCharting.csv
-app/db/sqlite3/eicu_v2_0_1_clean.sqlite3
+app/db/sqlite/eicu_v2_0_1_clean.sqlite3
 
 # Jupyter
 .Trash-0/
+.jupyter
