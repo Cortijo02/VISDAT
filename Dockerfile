@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11
 
 # Evitar pyc y buffering de stdout
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -29,3 +29,4 @@ EXPOSE 8501
 
 CMD ["sleep", "infinity"]
 # CMD ["streamlit", "run", "app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+# jupyter notebook --ip=0.0.0.0 --port=8501 --no-browser --allow-root --NotebookApp.token='' --NotebookApp.password=''
