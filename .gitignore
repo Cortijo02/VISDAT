@@ -205,3 +205,11 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# data
+app/db/csv_clean
+app/db/csv/nurseCharting.csv
+app/db/sqlite3/eicu_v2_0_1_clean.sqlite3
+
+# Jupyter
+.Trash-0/

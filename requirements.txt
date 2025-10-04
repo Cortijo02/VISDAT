@@ -1,0 +1,20 @@
+# Data & utils
+pandas
+numpy
+
+# Plotting
+matplotlib
+seaborn
+
+# ML & optimización
+scikit-learn
+xgboost
+nevergrad
+yellowbrick
+
+# App
+streamlit
+jupyter
+
+# optionally useful
+joblib
