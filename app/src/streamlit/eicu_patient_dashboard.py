@@ -21,6 +21,8 @@ import joblib
 from scipy.sparse import load_npz
 from sklearn.metrics import mean_absolute_error, r2_score
 
+from sklearn.cluster import KMeans
+
 from scipy.sparse import load_npz
 from sklearn.ensemble import VotingRegressor
 from sklearn.metrics import mean_absolute_error, r2_score
@@ -41,7 +43,7 @@ st.set_page_config(
 # --- Router de páginas ---
 if "_page" not in st.session_state:
     st.session_state["_page"] = "dashboard"
-# Estado inicial del selector de gráfico (evita doble clic)
+# Estado inicial del selector de gráfico (evita lag)
 if "viz" not in st.session_state:
     st.session_state["viz"] = "Resumen 3x3"
 
@@ -83,7 +85,7 @@ def load_sparse_matrix(path: str):
     return dfs
 
 # ----------------
-# Preprocesado 
+# Utils 
 # ----------------
 
 def numeric_age(s: pd.Series) -> pd.Series:
@@ -122,7 +124,7 @@ def top_n_index(s: pd.Series, n: int) -> pd.Index:
     return s.value_counts(dropna=False).head(n).index
 
 # -----------------------------
-# Funciones de plotting 
+# Plots
 # -----------------------------
 
 def plot_hist_los(df: pd.DataFrame, bins: int = 50, logy: bool = False, ax=None, line: bool = False):
@@ -138,7 +140,6 @@ def plot_hist_los(df: pd.DataFrame, bins: int = 50, logy: bool = False, ax=None,
 
     x = pd.to_numeric(df["icu_los_days"], errors="coerce").dropna()
 
-    # Si hay línea, normalizamos el hist a densidad para que encaje con la KDE
     density = bool(line)
     ax.hist(x, bins=bins, edgecolor="black", alpha=0.4, density=density)
 
@@ -174,7 +175,6 @@ def plot_bar_admit_source(
             raise ValueError(f"Falta la columna de hue '{hue_col}'.")
         data[hue_col] = data[hue_col].fillna("Desconocido")
 
-    # Top categorías
     top_categories = (
         data["hospitaladmitsource"].value_counts().head(top_n).index.tolist()
     )
@@ -187,7 +187,6 @@ def plot_bar_admit_source(
     else:
         fig = ax.figure
 
-    # Si hue == x, construimos un df compacto y evitamos duplicar barras
     if hue_col == "hospitaladmitsource":
         plot_df = (
             data["hospitaladmitsource"]
@@ -202,7 +201,7 @@ def plot_bar_admit_source(
             y="count",
             hue="hospitaladmitsource",
             order=top_categories,
-            dodge=False,  # una barra por categoría, coloreada
+            dodge=False,  
             ax=ax,
         )
     elif hue_col is not None:
@@ -241,7 +240,6 @@ def plot_bar_admit_source(
     ax.grid(True, axis="y", linestyle="--", alpha=0.4)
     plt.setp(ax.get_xticklabels(), rotation=25, ha="right")
 
-    # Etiquetas encima de cada barra
     if annotate:
         try:
             for container in ax.containers:
@@ -289,16 +287,12 @@ def plot_scatter_age_los(
     if len(tmp) > max_points:
         tmp = tmp.sample(max_points, random_state=42)
 
-    # Asegurar número de clusters válido
     n_clusters = max(1, min(n_clusters, len(tmp)))
 
-    # Clustering (fallback sencillo si no hay sklearn)
     try:
-        from sklearn.cluster import KMeans
         km = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
         labels = km.fit_predict(tmp[["age_years", "icu_los_days"]].to_numpy())
     except Exception:
-        # Fallback sin dependencias: agrupar por cuantiles de edad
         labels = pd.qcut(
             tmp["age_years"].rank(method="first"),
             q=n_clusters,
@@ -313,7 +307,6 @@ def plot_scatter_age_los(
     else:
         fig = ax.figure
 
-    # Dibujar cada cluster
     for k in range(len(np.unique(labels))):
         sub = tmp[labels == k]
         ax.scatter(
@@ -325,7 +318,6 @@ def plot_scatter_age_los(
             zorder=1,
         )
 
-    # Línea vertical de “tendencia” (centralidad en X)
     if line in ("median", "mean"):
         xval = tmp["age_years"].median() if line == "median" else tmp["age_years"].mean()
         ax.axvline(xval, linestyle="--", linewidth=2, label=f"{'Mediana' if line=='median' else 'Media'} edad", zorder=2)
@@ -368,8 +360,7 @@ def plot_violin_by_gender(df, ax=None, order=None):
         y="icu_los_days",
         hue="gender",          
         order=order,
-        palette=palette,       # paleta definida dentro
-        # inner="quartile",
+        palette=palette,       
         ax=ax
     )
 
@@ -450,13 +441,11 @@ def plot_box_los_by_ethnicity(
     else:
         fig = ax.figure
 
-    # Prepara datos
     tmp = df[["ethnicity", "icu_los_days"]].copy()
     tmp["ethnicity"] = tmp["ethnicity"].fillna("Desconocido").astype(str).str.title()
     tmp["icu_los_days"] = pd.to_numeric(tmp["icu_los_days"], errors="coerce")
     tmp = tmp.dropna(subset=["icu_los_days"])
 
-    # Top-N por frecuencia y filtro por mínimo tamaño
     top_eth = tmp["ethnicity"].value_counts().head(top_n).index
     tmp = tmp[tmp["ethnicity"].isin(top_eth)]
     counts = tmp["ethnicity"].value_counts()
@@ -469,7 +458,6 @@ def plot_box_los_by_ethnicity(
         ax.set_axis_off()
         return fig, ax
 
-    # Orden por mediana descendente
     order = (
         tmp.groupby("ethnicity")["icu_los_days"]
         .median()
@@ -478,7 +466,6 @@ def plot_box_los_by_ethnicity(
         .tolist()
     )
 
-    # Paleta de colores por categoría
     if colors is None:
         cmap_obj = plt.get_cmap(cmap)
         palette = [cmap_obj(i % cmap_obj.N) for i in range(len(order))]
@@ -488,7 +475,6 @@ def plot_box_los_by_ethnicity(
         fallback = [cmap_obj(i % cmap_obj.N) for i in range(len(order))]
         color_map = {e: colors.get(e, fallback[i]) for i, e in enumerate(order)}
 
-    # Boxplot (una caja por categoría en el orden definido)
     sns.boxplot(
         data=tmp,
         x="ethnicity",
@@ -500,7 +486,6 @@ def plot_box_los_by_ethnicity(
         linewidth=1.5,
     )
 
-    # (Opcional) anotar medianas como puntos encima de cada caja
     if annotate_median:
         medians = tmp.groupby("ethnicity")["icu_los_days"].median()
         xs = range(len(order))
@@ -514,14 +499,12 @@ def plot_box_los_by_ethnicity(
             linewidths=0.6
         )
 
-    # Estética
     ax.set_title("Estancia UCI por etnia (boxplot)")
     ax.set_xlabel("Etnia")
     ax.set_ylabel("Estancia UCI (días)")
     ax.grid(True, axis="y", linestyle="--", alpha=0.4)
     ax.set_xticklabels(order, rotation=25, ha="right")
 
-    # Leyenda consistente con los colores
     handles = [mpatches.Patch(facecolor=color_map[e], edgecolor="black", label=e) for e in order]
     ax.legend(handles=handles, title="Etnia", bbox_to_anchor=(1.02, 1),
               loc="upper left", borderaxespad=0)
@@ -720,10 +703,8 @@ def plot_dashboard_3x3(df, df_h):
 
     plot_scatter_age_los(df, n_clusters=cluster_n, line=trendline, ax=axs[1, 0])
     plot_bar_mean_by_dx(df, top_n=top_n_diag, ax=axs[1, 1])
-
     plot_patients_by_region(df_h, top_n=top_n_hosp, ax=axs[1, 2])
 
-    # plot_bar_mean_by_hospital(df, ax=axs[1, 2])
 
     plot_box_los_by_ethnicity(df, top_n=5, min_count=20, ax=axs[2, 0])
     plot_height_hist(df, bins=40, density=density_height, clip=(120, 210), ax=axs[2, 1])
@@ -766,22 +747,18 @@ def plot_patients_by_region(df_patient_with_region: pd.DataFrame, top_n: int | N
     if "region" not in df_patient_with_region.columns:
         raise ValueError("El DataFrame no tiene la columna 'region'. Ejecuta primero el merge.")
 
-    # Serie de regiones, con NaN -> 'Desconocido'
     series = df_patient_with_region["region"].fillna("Desconocido").astype(str)
 
-    # Recuentos y top N
     counts = series.value_counts()
     if top_n is not None:
         counts = counts.head(top_n)
     counts = counts.sort_values(ascending=True)
 
-    # Categorías a mostrar y filtrado de la serie a esas categorías
     cats = counts.index.tolist()
     series = series[series.isin(cats)]
 
-    # Mapear a códigos enteros manteniendo el orden definido por 'counts'
     cat = pd.Categorical(series, categories=cats, ordered=True)
-    codes = cat.codes  # 0..len(cats)-1
+    codes = cat.codes  
 
     created = False
     if ax is None:
@@ -790,11 +767,9 @@ def plot_patients_by_region(df_patient_with_region: pd.DataFrame, top_n: int | N
     else:
         fig = ax.figure
 
-    # Bins centrados en cada entero: [-0.5, 0.5], [0.5, 1.5], ...
     bins = np.arange(len(cats) + 1) - 0.5
     ax.hist(codes, bins=bins, edgecolor="black")
 
-    # Ejes y estilo
     ax.set_xticks(range(len(cats)))
     ax.set_xticklabels(cats, rotation=0)
     ax.set_title("Pacientes por región")
@@ -802,7 +777,6 @@ def plot_patients_by_region(df_patient_with_region: pd.DataFrame, top_n: int | N
     ax.set_ylabel("Número de pacientes")
     ax.grid(True, axis="y", linestyle="--", alpha=0.4)
 
-    # Anotar valores encima de cada barra usando 'counts'
     for i, v in enumerate(counts.values):
         ax.text(i, v, f" {v}", ha="center", va="bottom")
 
@@ -833,13 +807,6 @@ def find_model_file(models_dir: str, name_hints: list[str], exts=(".joblib", ".p
     # prioriza joblib/pkl sobre json/bin
     pref = sorted(cand, key=lambda p: (0 if os.path.splitext(p)[1] in (".joblib", ".pkl") else 1, len(p)))
     return pref[0] if pref else None
-
-@st.cache_resource(show_spinner=False)
-def build_voting_regressor(xgb_model, rf_model, weights=(1, 3)):
-    if (xgb_model is None) or (rf_model is None):
-        return None
-    return VotingRegressor([('xboost', xgb_model), ('rfreg', rf_model)], weights=list(weights))
-
 
 def fig_to_png_bytes(fig: plt.Figure) -> bytes:
     buf = io.BytesIO()
@@ -874,10 +841,6 @@ with st.sidebar:
     default_dir = st.session_state.get("_data_dir", "/app/app/db/csv_clean")
     data_dir = st.text_input("Directorio con CSV", value=default_dir, help="Debe contener patient.csv y (opcional) hospital.csv")
     st.session_state["_data_dir"] = data_dir
-
-    # st.caption("También puedes subir archivos si no tienes acceso al directorio")
-    # up_patient = st.file_uploader("Subir patient.csv", type=["csv"], accept_multiple_files=False)
-    # up_hospital = st.file_uploader("Subir hospital.csv (opcional)", type=["csv"], accept_multiple_files=False)
 
     st.markdown("---")
     st.header("📊 Visualización")
@@ -925,11 +888,7 @@ with st.sidebar:
 # -----------------------------
 
 dfs = {}
-# if up_patient is not None:
-#     dfs["patient"] = pd.read_csv(up_patient)
-#     if up_hospital is not None:
-#         dfs["hospital"] = pd.read_csv(up_hospital)
-# else:
+
 dfs = load_tables(data_dir)
 
 st.title("🩺 ICU Dashboard")
@@ -943,7 +902,6 @@ if "patient" not in dfs:
     )
     st.stop()
 
-# Preprocesado principal
 patient_raw = dfs["patient"]
 df_patient = preprocess_patient(patient_raw)
 
@@ -955,7 +913,6 @@ if st.session_state.get("_page") == "predicciones":
         "de su estancia en UCI con el **model_VotingRegressor.joblib**."
     )
 
-    # Rutas por defecto
     colp1, colp2 = st.columns(2)
     with colp1:
         path_xtest_csv = st.text_input("Ruta a X_test.csv", value="/app/app/src/test/X_test.csv")
@@ -965,14 +922,12 @@ if st.session_state.get("_page") == "predicciones":
         model_path = st.text_input("Ruta a model_VotingRegressor.joblib", value="/app/app/src/models/model_VotingRegressor.joblib")
         up_model = st.file_uploader("Subir model_VotingRegressor.joblib (opcional)", type=["joblib", "pkl"])
 
-    # Carga X_test.csv para indexar pacientes
     df_xtest = None
     try:
         df_xtest = pd.read_csv(path_xtest_csv)
     except Exception as e:
         st.error(f"No pude leer X_test.csv: {e}")
 
-    # Carga matriz dispersa X_T_test
     X_T_test = None
     if os.path.exists(path_sparse):
         try:
@@ -982,15 +937,12 @@ if st.session_state.get("_page") == "predicciones":
     else:
         st.warning(f"No existe el archivo: {path_sparse}")
 
-    # Verificación de alineación filas
     if (df_xtest is not None) and (X_T_test is not None) and (X_T_test.shape[0] != len(df_xtest)):
         st.warning(f"Tamaño inconsistente entre X_test.csv (n={len(df_xtest)}) y X_T_test.npz (n={X_T_test.shape[0]}). Revisa el preprocesado.")
 
-    # Selector de paciente
     idx = None
     if df_xtest is not None:
         st.subheader("👤 Selección de paciente")
-        # intenta usar un ID si existe
         id_col = None
         for c in ["patientunitstayid", "unitstayid", "patientid", "row_id", "subject_id"]:
             if c in df_xtest.columns:
@@ -1007,7 +959,6 @@ if st.session_state.get("_page") == "predicciones":
         with st.expander("🔎 Vista rápida de X_test.csv"):
             st.dataframe(df_xtest.head(50), use_container_width=True)
 
-    # Carga y_test si está disponible
     y_test = None
     if path_ytest and os.path.exists(path_ytest):
         try:
@@ -1015,7 +966,6 @@ if st.session_state.get("_page") == "predicciones":
         except Exception as e:
             st.warning(f"No pude leer y_test.csv: {e}")
 
-    # Carga del VotingRegressor ya entrenado
     st.subheader("🧠 Modelo: VotingRegressor")
     model = None
     try:
@@ -1031,12 +981,10 @@ if st.session_state.get("_page") == "predicciones":
     if model is None:
         st.stop()
 
-    # Botones de acción
     colb1, colb2 = st.columns(2)
     do_pred_row = colb1.button("🎯 Predecir paciente seleccionado")
     do_pred_all = colb2.button("📈 Predecir y evaluar todo el test")
 
-    # Predicción de una fila (manteniendo alineación con la matriz dispersa)
     if do_pred_row:
         if (X_T_test is None) or (df_xtest is None):
             st.error("Faltan X_T_test o X_test.csv para localizar la fila.")
@@ -1053,7 +1001,6 @@ if st.session_state.get("_page") == "predicciones":
             except Exception as e:
                 st.error(f"No se pudo predecir la fila {idx}: {e}")
 
-    # Predicción y métricas en todo el test
     if do_pred_all:
         if X_T_test is None:
             st.error("Falta X_T_test para predecir el conjunto completo.")
@@ -1062,7 +1009,6 @@ if st.session_state.get("_page") == "predicciones":
                 try:
                     pred = model.predict(X_T_test)
                     st.success(f"Predicciones generadas: {len(pred):,}".replace(",", "."))
-                    # métricas si hay y_test
                     if y_test is not None and len(y_test) == len(pred):
                         try:
                             mae = mean_absolute_error(y_test, pred)
@@ -1074,121 +1020,6 @@ if st.session_state.get("_page") == "predicciones":
                     elif y_test is not None:
                         st.warning(f"Dimensión inconsistente: y_test={len(y_test)} vs pred={len(pred)}. No calculo métricas.")
 
-                    # descarga CSV con predicciones (y GT si existe)
-                    out = pd.DataFrame({"pred": pred})
-                    if df_xtest is not None:
-                        out = pd.concat([df_xtest.reset_index(drop=True), out], axis=1)
-                    if y_test is not None and len(y_test) == len(pred):
-                        out["y_test"] = np.asarray(y_test)
-                    csv_bytes = out.to_csv(index=False).encode("utf-8")
-                    st.download_button("⬇️ Descargar predicciones (CSV)", data=csv_bytes, file_name="predicciones_test.csv", mime="text/csv")
-                except Exception as e:
-                    st.error(f"Fallo en predicción global: {e}")
-
-    st.stop()
-
-    st.caption(f"Modelo activo: VotingRegressor")
-
-    # Botones de acción
-    colb1, colb2 = st.columns(2)
-    do_pred_row = colb1.button("🎯 Predecir paciente seleccionado")
-    do_pred_all = colb2.button("📈 Predecir y evaluar todo el test")
-
-    # Predicción de una fila (manteniendo alineación con la matriz dispersa)
-    if do_pred_row:
-        if (X_T_test is None) or (df_xtest is None):
-            st.error("Faltan X_T_test o X_test.csv para localizar la fila.")
-        else:
-            try:
-                row_idx = int(idx)
-                x_row = X_T_test.getrow(row_idx)
-                y_hat = float(model_pred.predict(x_row)[0])
-                st.success(f"Predicción para la fila {row_idx}: **{y_hat:.3f}** (minutos)")
-                if y_test is not None and len(y_test) > row_idx:
-                    gt = float(y_test.iloc[row_idx]) if hasattr(y_test, 'iloc') else float(y_test[row_idx])
-                    st.info(f"Ground truth (y_test) fila {row_idx}: **{gt:.3f}** (minutos)")
-                    st.metric("Error absoluto", value=f"{abs(gt - y_hat):.3f}")
-            except Exception as e:
-                st.error(f"No se pudo predecir la fila {idx}: {e}")
-
-    # Predicción y métricas en todo el test
-    if do_pred_all:
-        if X_T_test is None:
-            st.error("Falta X_T_test para predecir el conjunto completo.")
-        else:
-            with st.spinner("Calculando predicciones en el test..."):
-                try:
-                    pred = model_pred.predict(X_T_test)
-                    st.success(f"Predicciones generadas: {len(pred):,}".replace(",", "."))
-                    # métricas si hay y_test
-                    if y_test is not None and len(y_test) == len(pred):
-                        try:
-                            mae = mean_absolute_error(y_test, pred)
-                            r2 = r2_score(y_test, pred)
-                            st.write(f"**MAE test:** {mae:.4f}")
-                            st.write(f"**R² test:** {r2:.4f}")
-                        except Exception as e:
-                            st.warning(f"No pude calcular métricas: {e}")
-                    elif y_test is not None:
-                        st.warning(f"Dimensión inconsistente: y_test={len(y_test)} vs pred={len(pred)}. No calculo métricas.")
-
-                    # descarga CSV con predicciones (y GT si existe)
-                    out = pd.DataFrame({"pred": pred})
-                    if df_xtest is not None:
-                        out = pd.concat([df_xtest.reset_index(drop=True), out], axis=1)
-                    if y_test is not None and len(y_test) == len(pred):
-                        out["y_test"] = np.asarray(y_test)
-                    csv_bytes = out.to_csv(index=False).encode("utf-8")
-                    st.download_button("⬇️ Descargar predicciones (CSV)", data=csv_bytes, file_name="predicciones_test.csv", mime="text/csv")
-                except Exception as e:
-                    st.error(f"Fallo en predicción global: {e}")
-
-    st.stop()
-
-    # Botones de acción
-    colb1, colb2 = st.columns(2)
-    do_pred_row = colb1.button("🎯 Predecir paciente seleccionado")
-    do_pred_all = colb2.button("📈 Predecir y evaluar todo el test")
-
-    # Predicción de una fila (manteniendo alineación con la matriz dispersa)
-    if do_pred_row:
-        if (X_T_test is None) or (df_xtest is None):
-            st.error("Faltan X_T_test o X_test.csv para localizar la fila.")
-        else:
-            try:
-                row_idx = int(idx)
-                x_row = X_T_test.getrow(row_idx)
-                y_hat = float(votingreg.predict(x_row)[0])
-                st.success(f"Predicción para la fila {row_idx}: **{y_hat:.3f}** (minutos)")
-                if y_test is not None and len(y_test) > row_idx:
-                    gt = float(y_test.iloc[row_idx]) if hasattr(y_test, 'iloc') else float(y_test[row_idx])
-                    st.info(f"Ground truth (y_test) fila {row_idx}: **{gt:.3f}** (minutos)")
-                    st.metric("Error absoluto", value=f"{abs(gt - y_hat):.3f}")
-            except Exception as e:
-                st.error(f"No se pudo predecir la fila {idx}: {e}")
-
-    # Predicción y métricas en todo el test
-    if do_pred_all:
-        if X_T_test is None:
-            st.error("Falta X_T_test para predecir el conjunto completo.")
-        else:
-            with st.spinner("Calculando predicciones en el test..."):
-                try:
-                    pred = votingreg.predict(X_T_test)
-                    st.success(f"Predicciones generadas: {len(pred):,}".replace(",", "."))
-                    # métricas si hay y_test
-                    if y_test is not None and len(y_test) == len(pred):
-                        try:
-                            mae = mean_absolute_error(y_test, pred)
-                            r2 = r2_score(y_test, pred)
-                            st.write(f"**MAE test:** {mae:.4f}")
-                            st.write(f"**R2 test:** {r2:.4f}")
-                        except Exception as e:
-                            st.warning(f"No pude calcular métricas: {e}")
-                    elif y_test is not None:
-                        st.warning(f"Dimensión inconsistente: y_test={len(y_test)} vs pred={len(pred)}. No calculo métricas.")
-
-                    # descarga CSV con predicciones (y GT si existe)
                     out = pd.DataFrame({"pred": pred})
                     if df_xtest is not None:
                         out = pd.concat([df_xtest.reset_index(drop=True), out], axis=1)
@@ -1250,7 +1081,6 @@ elif _selected == "Estancia media UCI (Diagnosticos)":
         st.warning(f"No se pudo generar el gráfico: {e}")
 elif _selected == "Estancia media UCI (Hospital)":
     try:
-        # fig, _ = plot_bar_mean_by_hospital(df_patient, top_n=top_n)
         fig, _ = plot_patients_by_region(df_patient_region, top_n=top_n_hosp)
         render_plot(fig, "los_por_hospital")
     except Exception as e:
@@ -1264,15 +1094,5 @@ elif _selected == "Height":
 elif _selected == "Zona UCI":
     fig, _ = plot_pie_hospital_admit_source(df_patient, top_n=top_n_zone)
     render_plot(fig, "admission_pie")
-# elif _selected == "Region":
-#     if "hospital" not in dfs:
-#         st.info("Sube `hospital.csv` o colócalo en el directorio de datos para ver este gráfico.")
-#     else:
-#         try:
-#             df_patient_region = merge_patient_with_region(df_patient, dfs["hospital"])
-#             fig, _ = plot_patients_by_region(df_patient_region)
-#             render_plot(fig, "pacientes_por_region")
-#         except Exception as e:
-#             st.warning(f"No se pudo generar el gráfico por región: {e}")
 
 st.caption("Alejandro Cortijo Benito -- 2025 (alejandro.cortijo.benito@alumnos.upm.es)")
