@@ -13,4 +13,21 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
 
-    # command: 
+    command:
+      - bash
+      - -lc
+      - |
+        set -e
+        # Jupyter
+        jupyter notebook \
+          --ip=0.0.0.0 \
+          --port=8501 \
+          --no-browser \
+          --allow-root \
+          --ServerApp.token= \
+          --ServerApp.password= &
+
+        # Streamlit
+        exec streamlit run app/src/streamlit/eicu_patient_dashboard.py \
+          --server.address=0.0.0.0 \
+          --server.port=8502
