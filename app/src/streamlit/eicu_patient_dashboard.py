@@ -1,8 +1,3 @@
-# Streamlit ICU Dashboard — basado en tu script de Jupyter
-# ---------------------------------------------------------
-# Ejecuta con:  streamlit run streamlit_dashboard_app.py
-# Requisitos (mínimo): streamlit, pandas, numpy, matplotlib, seaborn
-
 from __future__ import annotations
 
 import os
@@ -13,7 +8,9 @@ from typing import Optional, Dict
 import numpy as np
 import pandas as pd
 import matplotlib
+
 matplotlib.use("Agg")  # backend no interactivo para Streamlit
+
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.patches import Patch
@@ -24,15 +21,10 @@ import joblib
 from scipy.sparse import load_npz
 from sklearn.metrics import mean_absolute_error, r2_score
 
-# === Nuevos imports para predicción ===
 from scipy.sparse import load_npz
-from sklearn.ensemble import VotingRegressor, RandomForestRegressor
+from sklearn.ensemble import VotingRegressor
 from sklearn.metrics import mean_absolute_error, r2_score
 import joblib
-try:
-    import xgboost as xgb
-except Exception:
-    xgb = None
 
 warnings.filterwarnings("ignore")
 
@@ -90,9 +82,9 @@ def load_sparse_matrix(path: str):
         dfs["hospital"] = read_csv_safe(h_path)
     return dfs
 
-# -----------------------------
-# Preprocesado (adaptado de tu script)
-# -----------------------------
+# ----------------
+# Preprocesado 
+# ----------------
 
 def numeric_age(s: pd.Series) -> pd.Series:
     s = s.astype(str)
@@ -130,10 +122,13 @@ def top_n_index(s: pd.Series, n: int) -> pd.Index:
     return s.value_counts(dropna=False).head(n).index
 
 # -----------------------------
-# Funciones de plotting (adaptadas/copiadas de tu script)
+# Funciones de plotting 
 # -----------------------------
 
-def plot_hist_los(df: pd.DataFrame, bins: int = 50, logy: bool = False, ax=None):
+def plot_hist_los(df: pd.DataFrame, bins: int = 50, logy: bool = False, ax=None, line: bool = False):
+    if "icu_los_days" not in df.columns:
+        raise ValueError("Falta la columna 'icu_los_days'.")
+
     created = False
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 5))
@@ -141,58 +136,129 @@ def plot_hist_los(df: pd.DataFrame, bins: int = 50, logy: bool = False, ax=None)
     else:
         fig = ax.figure
 
-    x = df["icu_los_days"].dropna()
-    ax.hist(x, bins=bins, edgecolor="black")
+    x = pd.to_numeric(df["icu_los_days"], errors="coerce").dropna()
+
+    # Si hay línea, normalizamos el hist a densidad para que encaje con la KDE
+    density = bool(line)
+    ax.hist(x, bins=bins, edgecolor="black", alpha=0.4, density=density)
+
+    if line:
+        sns.kdeplot(x=x, ax=ax, linewidth=2, color="blue", bw_method="scott", cut=0)
+
     ax.set_title("Histograma de estancia en UCI (días)")
     ax.set_xlabel("Estancia UCI (días)")
-    ax.set_ylabel("Frecuencia")
+    ax.set_ylabel("Densidad" if density else "Frecuencia")
     ax.grid(True, linestyle="--", alpha=0.4)
     if logy:
         ax.set_yscale("log")
+
     if created:
         fig.tight_layout()
     return fig, ax
 
 
-def plot_box_by_gender(df: pd.DataFrame, ax=None):
-    if "gender" not in df.columns:
-        raise ValueError("Falta la columna 'gender'.")
-    created = False
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 5))
-        created = True
-    else:
-        fig = ax.figure
-
-    genders = list(df["gender"].dropna().unique())
-    data = [df.loc[df["gender"] == g, "icu_los_days"].dropna() for g in genders]
-    ax.boxplot(data, labels=genders, showfliers=True)
-    ax.set_title("Estancia en UCI por género")
-    ax.set_xlabel("Género")
-    ax.set_ylabel("Estancia UCI (días)")
-    ax.grid(True, linestyle="--", alpha=0.4)
-    if created:
-        fig.tight_layout()
-    return fig, ax
-
-
-def plot_bar_admit_source(df: pd.DataFrame, top_n: int = 8, ax=None):
+def plot_bar_admit_source(
+    df: pd.DataFrame,
+    top_n: int = 8,
+    hue_col: str | None = "hospitaladmitsource",
+    ax=None,
+    annotate: bool = True,
+):
     if "hospitaladmitsource" not in df.columns:
         raise ValueError("Falta la columna 'hospitaladmitsource'.")
+
+    data = df.copy()
+    data["hospitaladmitsource"] = data["hospitaladmitsource"].fillna("Desconocido")
+    if hue_col is not None:
+        if hue_col not in data.columns:
+            raise ValueError(f"Falta la columna de hue '{hue_col}'.")
+        data[hue_col] = data[hue_col].fillna("Desconocido")
+
+    # Top categorías
+    top_categories = (
+        data["hospitaladmitsource"].value_counts().head(top_n).index.tolist()
+    )
+    data = data[data["hospitaladmitsource"].isin(top_categories)]
+
     created = False
     if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 5))
+        fig, ax = plt.subplots(figsize=(9, 7.5))
         created = True
     else:
         fig = ax.figure
 
-    counts = df["hospitaladmitsource"].fillna("Desconocido").value_counts().head(top_n)
-    ax.bar(counts.index, counts.values, edgecolor="black")
+    # Si hue == x, construimos un df compacto y evitamos duplicar barras
+    if hue_col == "hospitaladmitsource":
+        plot_df = (
+            data["hospitaladmitsource"]
+            .value_counts()
+            .loc[top_categories]
+            .rename_axis("hospitaladmitsource")
+            .reset_index(name="count")
+        )
+        sns.barplot(
+            data=plot_df,
+            x="hospitaladmitsource",
+            y="count",
+            hue="hospitaladmitsource",
+            order=top_categories,
+            dodge=False,  # una barra por categoría, coloreada
+            ax=ax,
+        )
+    elif hue_col is not None:
+        plot_df = (
+            data.groupby(["hospitaladmitsource", hue_col])
+            .size()
+            .reset_index(name="count")
+        )
+        sns.barplot(
+            data=plot_df,
+            x="hospitaladmitsource",
+            y="count",
+            hue=hue_col,
+            order=top_categories,
+            ax=ax,
+        )
+    else:
+        plot_df = (
+            data["hospitaladmitsource"]
+            .value_counts()
+            .loc[top_categories]
+            .rename_axis("hospitaladmitsource")
+            .reset_index(name="count")
+        )
+        sns.barplot(
+            data=plot_df,
+            x="hospitaladmitsource",
+            y="count",
+            order=top_categories,
+            ax=ax,
+        )
+
     ax.set_title(f"Fuente de admisión hospitalaria (top {top_n})")
     ax.set_xlabel("Fuente de admisión")
     ax.set_ylabel("Pacientes")
     ax.grid(True, axis="y", linestyle="--", alpha=0.4)
     plt.setp(ax.get_xticklabels(), rotation=25, ha="right")
+
+    # Etiquetas encima de cada barra
+    if annotate:
+        try:
+            for container in ax.containers:
+                ax.bar_label(container, fmt="%.0f", padding=2)
+        except Exception:
+            for p in ax.patches:
+                h = p.get_height()
+                ax.annotate(
+                    f"{int(h)}",
+                    (p.get_x() + p.get_width() / 2.0, h),
+                    ha="center",
+                    va="bottom",
+                    fontsize=9,
+                    xytext=(0, 2),
+                    textcoords="offset points",
+                )
+
     if created:
         fig.tight_layout()
     return fig, ax
@@ -200,17 +266,46 @@ def plot_bar_admit_source(df: pd.DataFrame, top_n: int = 8, ax=None):
 
 def plot_scatter_age_los(
     df: pd.DataFrame,
+    n_clusters: int = 3,
     max_points: int = 50000,
     ax=None,
-    trendline: bool = True,
-    method: str = "linear",  # "linear" | "lowess"
-    smooth_frac: float = 0.25,
-    colorize_bins: bool = True,
-    add_kde: bool = True,
-    kde_levels: int = 10,
-    kde_fill: bool = True,
-    kde_alpha: float = 0.25,
+    line: str = "median",  # "median" | "mean" | None
 ):
+    """
+    Scatter de edad (x) vs estancia UCI (y) con:
+      - Clustering KMeans para colorear puntos.
+      - Línea vertical en la mediana (o media) de la edad.
+    Sin regresiones ni suavizados.
+
+    Requisitos mínimos: columnas 'age_years' y 'icu_los_days'.
+    """
+    if not {"age_years", "icu_los_days"} <= set(df.columns):
+        raise ValueError("Faltan columnas: se requieren 'age_years' y 'icu_los_days'.")
+
+    tmp = df[["age_years", "icu_los_days"]].dropna()
+    if len(tmp) == 0:
+        raise ValueError("No hay datos válidos tras eliminar NaN.")
+
+    if len(tmp) > max_points:
+        tmp = tmp.sample(max_points, random_state=42)
+
+    # Asegurar número de clusters válido
+    n_clusters = max(1, min(n_clusters, len(tmp)))
+
+    # Clustering (fallback sencillo si no hay sklearn)
+    try:
+        from sklearn.cluster import KMeans
+        km = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
+        labels = km.fit_predict(tmp[["age_years", "icu_los_days"]].to_numpy())
+    except Exception:
+        # Fallback sin dependencias: agrupar por cuantiles de edad
+        labels = pd.qcut(
+            tmp["age_years"].rank(method="first"),
+            q=n_clusters,
+            labels=False,
+            duplicates="drop",
+        ).to_numpy()
+
     created = False
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 5))
@@ -218,68 +313,68 @@ def plot_scatter_age_los(
     else:
         fig = ax.figure
 
-    tmp = df[["age_years", "icu_los_days"]].dropna()
-    if len(tmp) > max_points:
-        tmp = tmp.sample(max_points, random_state=42)
-
-    # KDE 2D
-    if add_kde and len(tmp) >= 10:
-        try:
-            sns.kdeplot(
-                x=tmp["age_years"],
-                y=tmp["icu_los_days"],
-                ax=ax,
-                levels=kde_levels,
-                fill=kde_fill,
-                alpha=kde_alpha,
-                thresh=0,
-                bw_method="scott",
-                cmap="Greys",
-                linewidths=1,
-                zorder=0,
-            )
-        except Exception:
-            pass
-
-    # Puntos
-    if colorize_bins:
-        bins = [-np.inf, 30, 60, 80, np.inf]
-        labels = ["<30", "30–60", "60–80", "80+"]
-        tmp = tmp.copy()
-        tmp["age_bin"] = pd.cut(
-            tmp["age_years"], bins=bins, labels=labels, right=False, include_lowest=True
+    # Dibujar cada cluster
+    for k in range(len(np.unique(labels))):
+        sub = tmp[labels == k]
+        ax.scatter(
+            sub["age_years"],
+            sub["icu_los_days"],
+            s=16,
+            alpha=0.5,
+            label=f"Cluster {k+1}",
+            zorder=1,
         )
-        for label, sub in tmp.groupby("age_bin", sort=False):
-            if len(sub) == 0:
-                continue
-            ax.scatter(sub["age_years"], sub["icu_los_days"], alpha=0.5, s=20, label=str(label), zorder=1)
-        ax.legend(title="Edad (años)", loc="best")
-    else:
-        ax.scatter(tmp["age_years"], tmp["icu_los_days"], alpha=0.5, s=20, zorder=1)
 
-    # Tendencia
-    if trendline and len(tmp) >= 2:
-        x = tmp["age_years"].to_numpy()
-        y = tmp["icu_los_days"].to_numpy()
-        if method == "lowess":
-            try:
-                from statsmodels.nonparametric.smoothers_lowess import lowess
+    # Línea vertical de “tendencia” (centralidad en X)
+    if line in ("median", "mean"):
+        xval = tmp["age_years"].median() if line == "median" else tmp["age_years"].mean()
+        ax.axvline(xval, linestyle="--", linewidth=2, label=f"{'Mediana' if line=='median' else 'Media'} edad", zorder=2)
 
-                sm = lowess(y, x, frac=smooth_frac, it=0, return_sorted=True)
-                ax.plot(sm[:, 0], sm[:, 1], linewidth=2, label="Tendencia (LOWESS)", zorder=2)
-            except Exception:
-                p = np.polyfit(x, y, 1)
-                xx = np.linspace(x.min(), x.max(), 200)
-                ax.plot(xx, np.polyval(p, xx), linewidth=2, label="Tendencia (lineal)", zorder=2)
-                ax.legend(loc="best")
-        elif method == "linear":
-            p = np.polyfit(x, y, 1)
-            xx = np.linspace(x.min(), x.max(), 200)
-            ax.plot(xx, np.polyval(p, xx), linewidth=2, label="Tendencia (lineal)", zorder=2)
-            ax.legend(loc="best")
-
-    ax.set_title("Edad vs estancia en UCI")
+    ax.set_title("Edad vs estancia en UCI (clusters)")
     ax.set_xlabel("Edad (años)")
+    ax.set_ylabel("Estancia UCI (días)")
+    ax.grid(True, linestyle="--", alpha=0.4)
+    ax.legend(loc="best")
+
+    if created:
+        fig.tight_layout()
+    return fig, ax
+
+
+def plot_violin_by_gender(df, ax=None, order=None):
+    """
+    Dibuja un violinplot de estancia en UCI por género, coloreando por 'gender'
+    con una paleta definida internamente.
+    """
+    if "gender" not in df.columns or "icu_los_days" not in df.columns:
+        raise ValueError("Faltan columnas requeridas: 'gender' y 'icu_los_days'.")
+
+    if order is None:
+        order = pd.Index(df["gender"].dropna().unique())
+
+    colors = sns.color_palette("husl", n_colors=len(order))
+    palette = dict(zip(order, colors))
+
+    created = False
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 5))
+        created = True
+    else:
+        fig = ax.figure
+
+    sns.violinplot(
+        data=df,
+        x="gender",
+        y="icu_los_days",
+        hue="gender",          
+        order=order,
+        palette=palette,       # paleta definida dentro
+        # inner="quartile",
+        ax=ax
+    )
+
+    ax.set_title("Estancia en UCI por género")
+    ax.set_xlabel("Género")
     ax.set_ylabel("Estancia UCI (días)")
     ax.grid(True, linestyle="--", alpha=0.4)
 
@@ -332,15 +427,22 @@ def plot_bar_mean_by_hospital(df: pd.DataFrame, top_n: int = 8, ax=None):
         fig.tight_layout()
     return fig, ax
 
-
-def plot_violin_los_by_ethnicity(
+def plot_box_los_by_ethnicity(
     df: pd.DataFrame,
     top_n: int = 5,
     min_count: int = 20,
     ax=None,
     cmap: str = "tab20",
     colors: Optional[Dict[str, str]] = None,
+    showfliers: bool = True,
+    annotate_median: bool = False,
 ):
+    """
+    Boxplot de estancia en UCI (icu_los_days) por etnia (ethnicity).
+    - Filtra a las 'top_n' etnias más frecuentes y descarta grupos con < min_count.
+    - Ordena las categorías por mediana de estancia (descendente).
+    - Colorea por categoría y añade leyenda consistente.
+    """
     created = False
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 5))
@@ -348,57 +450,81 @@ def plot_violin_los_by_ethnicity(
     else:
         fig = ax.figure
 
+    # Prepara datos
     tmp = df[["ethnicity", "icu_los_days"]].copy()
     tmp["ethnicity"] = tmp["ethnicity"].fillna("Desconocido").astype(str).str.title()
+    tmp["icu_los_days"] = pd.to_numeric(tmp["icu_los_days"], errors="coerce")
     tmp = tmp.dropna(subset=["icu_los_days"])
 
+    # Top-N por frecuencia y filtro por mínimo tamaño
     top_eth = tmp["ethnicity"].value_counts().head(top_n).index
     tmp = tmp[tmp["ethnicity"].isin(top_eth)]
-
     counts = tmp["ethnicity"].value_counts()
     valid_eth = counts[counts >= min_count].index
     tmp = tmp[tmp["ethnicity"].isin(valid_eth)]
 
     if tmp.empty:
-        ax.text(0.5, 0.5, "Sin datos suficientes tras el filtrado", ha="center", va="center", transform=ax.transAxes)
+        ax.text(0.5, 0.5, "Sin datos suficientes tras el filtrado",
+                ha="center", va="center", transform=ax.transAxes)
         ax.set_axis_off()
         return fig, ax
 
+    # Orden por mediana descendente
     order = (
-        tmp.groupby("ethnicity")["icu_los_days"].median().sort_values(ascending=False).index.tolist()
+        tmp.groupby("ethnicity")["icu_los_days"]
+        .median()
+        .sort_values(ascending=False)
+        .index
+        .tolist()
     )
 
-    data = [tmp.loc[tmp["ethnicity"] == e, "icu_los_days"].values for e in order]
-    parts = ax.violinplot(data, showmeans=False, showmedians=True, showextrema=False)
-
+    # Paleta de colores por categoría
     if colors is None:
         cmap_obj = plt.get_cmap(cmap)
         palette = [cmap_obj(i % cmap_obj.N) for i in range(len(order))]
         color_map = {e: palette[i] for i, e in enumerate(order)}
     else:
         cmap_obj = plt.get_cmap(cmap)
-        palette = [cmap_obj(i % cmap_obj.N) for i in range(len(order))]
-        color_map = {e: colors.get(e, palette[i]) for i, e in enumerate(order)}
+        fallback = [cmap_obj(i % cmap_obj.N) for i in range(len(order))]
+        color_map = {e: colors.get(e, fallback[i]) for i, e in enumerate(order)}
 
-    for pc, e in zip(parts["bodies"], order):
-        pc.set_facecolor(color_map[e])
-        pc.set_edgecolor("black")
-        pc.set_alpha(0.8)
-
-    med = [np.median(d) if len(d) else np.nan for d in data]
-    ax.scatter(
-        range(1, len(data) + 1), med, marker="o", zorder=3, c=[color_map[e] for e in order], edgecolor="black"
+    # Boxplot (una caja por categoría en el orden definido)
+    sns.boxplot(
+        data=tmp,
+        x="ethnicity",
+        y="icu_los_days",
+        order=order,
+        palette=[color_map[e] for e in order],
+        ax=ax,
+        showfliers=showfliers,
+        linewidth=1.5,
     )
 
-    ax.set_xticks(range(1, len(order) + 1))
-    ax.set_xticklabels(order, rotation=25, ha="right")
-    ax.set_title("Estancia UCI por etnia")
+    # (Opcional) anotar medianas como puntos encima de cada caja
+    if annotate_median:
+        medians = tmp.groupby("ethnicity")["icu_los_days"].median()
+        xs = range(len(order))
+        ys = [medians[e] for e in order]
+        ax.scatter(
+            xs, ys,
+            zorder=3,
+            s=40,
+            c=[color_map[e] for e in order],
+            edgecolor="black",
+            linewidths=0.6
+        )
+
+    # Estética
+    ax.set_title("Estancia UCI por etnia (boxplot)")
     ax.set_xlabel("Etnia")
     ax.set_ylabel("Estancia UCI (días)")
     ax.grid(True, axis="y", linestyle="--", alpha=0.4)
+    ax.set_xticklabels(order, rotation=25, ha="right")
 
+    # Leyenda consistente con los colores
     handles = [mpatches.Patch(facecolor=color_map[e], edgecolor="black", label=e) for e in order]
-    ax.legend(handles=handles, title="Etnia", bbox_to_anchor=(1.02, 1), loc="upper left", borderaxespad=0)
+    ax.legend(handles=handles, title="Etnia", bbox_to_anchor=(1.02, 1),
+              loc="upper left", borderaxespad=0)
 
     if created:
         fig.tight_layout()
@@ -584,27 +710,30 @@ def plot_pie_hospital_admit_source(
     return fig, ax
 
 
-def plot_dashboard_3x3(df: pd.DataFrame):
-    fig, axs = plt.subplots(3, 3, figsize=(22, 15))
+def plot_dashboard_3x3(df, df_h):
+    fig, axs = plt.subplots(3, 3, figsize=(25, 18))
     axs = np.asarray(axs)
 
-    plot_hist_los(df, ax=axs[0, 0])
-    plot_box_by_gender(df, ax=axs[0, 1])
-    plot_bar_admit_source(df, ax=axs[0, 2])
+    plot_hist_los(df, line=density_hist, bins=bins_hist, ax=axs[0, 0])
+    plot_violin_by_gender(df, ax=axs[0, 1])
+    plot_bar_admit_source(df, top_n=top_n, ax=axs[0, 2])
 
-    plot_scatter_age_los(df, ax=axs[1, 0])
-    plot_bar_mean_by_dx(df, ax=axs[1, 1])
-    plot_bar_mean_by_hospital(df, ax=axs[1, 2])
+    plot_scatter_age_los(df, n_clusters=cluster_n, line=trendline, ax=axs[1, 0])
+    plot_bar_mean_by_dx(df, top_n=top_n_diag, ax=axs[1, 1])
 
-    plot_violin_los_by_ethnicity(df, ax=axs[2, 0])
-    plot_height_hist(df, ax=axs[2, 1])
-    plot_pie_hospital_admit_source(df, ax=axs[2, 2])
+    plot_patients_by_region(df_h, top_n=top_n_hosp, ax=axs[1, 2])
+
+    # plot_bar_mean_by_hospital(df, ax=axs[1, 2])
+
+    plot_box_los_by_ethnicity(df, top_n=5, min_count=20, ax=axs[2, 0])
+    plot_height_hist(df, bins=40, density=density_height, clip=(120, 210), ax=axs[2, 1])
+    plot_pie_hospital_admit_source(df, top_n=top_n_zone, ax=axs[2, 2])
 
     fig.tight_layout()
     return fig, axs
 
 # -----------------------------
-# Pacientes por región (usa hospital.csv)
+# Pacientes por región (hospital.csv)
 # -----------------------------
 
 def merge_patient_with_region(df_patient: pd.DataFrame, hospital_df: pd.DataFrame) -> pd.DataFrame:
@@ -628,27 +757,57 @@ def merge_patient_with_region(df_patient: pd.DataFrame, hospital_df: pd.DataFram
     return merged
 
 
-def plot_patients_by_region(df_patient_with_region: pd.DataFrame, top_n: int | None = None):
+def plot_patients_by_region(df_patient_with_region: pd.DataFrame, top_n: int | None = None, ax=None):
+    """
+    Histograma de pacientes por región (categorías discretas).
+    - Si se pasa top_n, se muestran solo las top N regiones más frecuentes.
+    - Orden ascendente por recuento, como en la versión original.
+    """
     if "region" not in df_patient_with_region.columns:
         raise ValueError("El DataFrame no tiene la columna 'region'. Ejecuta primero el merge.")
 
-    counts = df_patient_with_region["region"].fillna("Desconocido").value_counts()
+    # Serie de regiones, con NaN -> 'Desconocido'
+    series = df_patient_with_region["region"].fillna("Desconocido").astype(str)
+
+    # Recuentos y top N
+    counts = series.value_counts()
     if top_n is not None:
         counts = counts.head(top_n)
-
     counts = counts.sort_values(ascending=True)
 
-    fig, ax = plt.subplots(figsize=(9, 5))
-    ax.barh(counts.index.astype(str), counts.values, edgecolor="black")
+    # Categorías a mostrar y filtrado de la serie a esas categorías
+    cats = counts.index.tolist()
+    series = series[series.isin(cats)]
+
+    # Mapear a códigos enteros manteniendo el orden definido por 'counts'
+    cat = pd.Categorical(series, categories=cats, ordered=True)
+    codes = cat.codes  # 0..len(cats)-1
+
+    created = False
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(9, 5))
+        created = True
+    else:
+        fig = ax.figure
+
+    # Bins centrados en cada entero: [-0.5, 0.5], [0.5, 1.5], ...
+    bins = np.arange(len(cats) + 1) - 0.5
+    ax.hist(codes, bins=bins, edgecolor="black")
+
+    # Ejes y estilo
+    ax.set_xticks(range(len(cats)))
+    ax.set_xticklabels(cats, rotation=0)
     ax.set_title("Pacientes por región")
-    ax.set_xlabel("Número de pacientes")
-    ax.set_ylabel("Región")
-    ax.grid(True, axis="x", linestyle="--", alpha=0.4)
+    ax.set_xlabel("Región")
+    ax.set_ylabel("Número de pacientes")
+    ax.grid(True, axis="y", linestyle="--", alpha=0.4)
 
+    # Anotar valores encima de cada barra usando 'counts'
     for i, v in enumerate(counts.values):
-        ax.text(v, i, f" {v}", va="center")
+        ax.text(i, v, f" {v}", ha="center", va="bottom")
 
-    fig.tight_layout()
+    if created:
+        fig.tight_layout()
     return fig, ax
 
 # -----------------------------
@@ -674,36 +833,6 @@ def find_model_file(models_dir: str, name_hints: list[str], exts=(".joblib", ".p
     # prioriza joblib/pkl sobre json/bin
     pref = sorted(cand, key=lambda p: (0 if os.path.splitext(p)[1] in (".joblib", ".pkl") else 1, len(p)))
     return pref[0] if pref else None
-
-@st.cache_resource(show_spinner=False)
-def load_xgb_regressor(path: str):
-    if path is None:
-        return None
-    # intenta joblib/pkl primero
-    ext = os.path.splitext(path)[1].lower()
-    if ext in (".joblib", ".pkl"):
-        try:
-            return joblib.load(path)
-        except Exception:
-            pass
-    # fallback: formato nativo XGBoost
-    if xgb is not None:
-        try:
-            model = xgb.XGBRegressor()
-            model.load_model(path)
-            return model
-        except Exception:
-            return None
-    return None
-
-@st.cache_resource(show_spinner=False)
-def load_rf_regressor(path: str):
-    if path is None:
-        return None
-    try:
-        return joblib.load(path)
-    except Exception:
-        return None
 
 @st.cache_resource(show_spinner=False)
 def build_voting_regressor(xgb_model, rf_model, weights=(1, 3)):
@@ -746,9 +875,9 @@ with st.sidebar:
     data_dir = st.text_input("Directorio con CSV", value=default_dir, help="Debe contener patient.csv y (opcional) hospital.csv")
     st.session_state["_data_dir"] = data_dir
 
-    st.caption("También puedes subir archivos si no tienes acceso al directorio")
-    up_patient = st.file_uploader("Subir patient.csv", type=["csv"], accept_multiple_files=False)
-    up_hospital = st.file_uploader("Subir hospital.csv (opcional)", type=["csv"], accept_multiple_files=False)
+    # st.caption("También puedes subir archivos si no tienes acceso al directorio")
+    # up_patient = st.file_uploader("Subir patient.csv", type=["csv"], accept_multiple_files=False)
+    # up_hospital = st.file_uploader("Subir hospital.csv (opcional)", type=["csv"], accept_multiple_files=False)
 
     st.markdown("---")
     st.header("📊 Visualización")
@@ -758,35 +887,50 @@ with st.sidebar:
         "Estancia media UCI (Género)",
         "Admisión",
         "Estancia media UCI (Edad)",
-        "Estancia media UCI (diagnosticos)",
-        "Estancia media UCI",
+        "Estancia media UCI (Diagnosticos)",
+        "Estancia media UCI (Hospital)",
         "Ethnicity",
         "Height",
         "Zona UCI",
-        "Region",
     ]
     _selected = st.radio("Elige un gráfico", _viz_options, key="viz")
 
     st.header("🎛️ Parámetros de gráficos")
-    bins_hist = st.slider("Bins histograma LOS", 10, 150, 50, step=5)
-    logy_hist = st.checkbox("Escala log en histograma LOS", value=False)
-    top_n = st.slider("Top N categorías (admisión/diagnóstico/hospital)", 3, 20, 8)
-    trendline = st.checkbox("Línea de tendencia (Edad vs LOS)", value=True)
-    method = st.selectbox("Método de tendencia", ["linear", "lowess"], index=0)
-    add_kde = st.checkbox("KDE 2D (Edad vs LOS)", value=True)
-    density_height = st.checkbox("Altura: normalizar (densidad)", value=False)
+    bins_hist = st.slider("Bins histograma estacia media", 10, 150, 50, step=5)
+    density_hist = st.checkbox("Tendencia", value=False)
+
+    top_n = st.slider("Top N categorías admisiones", 3, 13, 8)
+
+    cluster_n = st.slider("N clusters (Edad vs Estancia UCI)", 2, 5, 3) 
+    opcion = st.selectbox("Tendencia scatter", ["Ninguna", "Mediana", "Media"], index=0)
+    trendline = {"Ninguna": None, "Mediana": "median", "Media": "mean"}[opcion]
+
+    top_n_diag = st.slider("Top N categorías diagnosticos", 3, 10, 8)
+    top_n_hosp = st.slider("Top N hospitales", 2, 5, 3)
+
+    density_height = st.checkbox("Normalizar altura", value=False)
+
+    with st.sidebar:
+        top_n_zone = st.number_input(
+            "Top N zonas",
+            min_value=2,
+            max_value=8,
+            value=5,
+            step=1,
+            help="Número de zonas a mostrar en el pie. (max 8)"
+        )
 
 # -----------------------------
 # Carga de datos
 # -----------------------------
 
 dfs = {}
-if up_patient is not None:
-    dfs["patient"] = pd.read_csv(up_patient)
-    if up_hospital is not None:
-        dfs["hospital"] = pd.read_csv(up_hospital)
-else:
-    dfs = load_tables(data_dir)
+# if up_patient is not None:
+#     dfs["patient"] = pd.read_csv(up_patient)
+#     if up_hospital is not None:
+#         dfs["hospital"] = pd.read_csv(up_hospital)
+# else:
+dfs = load_tables(data_dir)
 
 st.title("🩺 ICU Dashboard")
 st.write(
@@ -808,7 +952,7 @@ if st.session_state.get("_page") == "predicciones":
     st.title("🔮 Predicciones — Test set (VotingRegressor)")
     st.write(
         "Selecciona un paciente de la tabla de abajo. Con el índice de la fila sacamos la predicción "
-        "de la estancia con el **model_VotingRegressor.joblib**."
+        "de su estancia en UCI con el **model_VotingRegressor.joblib**."
     )
 
     # Rutas por defecto
@@ -904,7 +1048,7 @@ if st.session_state.get("_page") == "predicciones":
                 st.success(f"Predicción para la fila {row_idx}: **{y_hat:.3f}** (minutos)")
                 if y_test is not None and len(y_test) > row_idx:
                     gt = float(y_test.iloc[row_idx]) if hasattr(y_test, 'iloc') else float(y_test[row_idx])
-                    st.info(f"Ground truth (y_test) fila {row_idx}: **{gt:.3f}** (minutos)")
+                    st.info(f"Ground truth fila {row_idx}: **{gt:.3f}** (minutos)")
                     st.metric("Error absoluto", value=f"{abs(gt - y_hat):.3f}")
             except Exception as e:
                 st.error(f"No se pudo predecir la fila {idx}: {e}")
@@ -943,7 +1087,7 @@ if st.session_state.get("_page") == "predicciones":
 
     st.stop()
 
-    st.caption(f"Modelo activo: {model_desc}")
+    st.caption(f"Modelo activo: VotingRegressor")
 
     # Botones de acción
     colb1, colb2 = st.columns(2)
@@ -1064,9 +1208,7 @@ with c1:
 with c2:
     st.metric("Edad media", value=f"{df_patient['age_years'].mean():.1f} años")
 with c3:
-    st.metric("LOS mediana", value=f"{df_patient['icu_los_days'].median():.1f} días")
-with c4:
-    st.metric("% Faltantes en LOS", value=f"{100*df_patient['icu_los_days'].isna().mean():.1f}%")
+    st.metric("Mediana estancia en UCI", value=f"{df_patient['icu_los_days'].median():.1f} días")
 
 # Datos (opcional)
 with st.expander("🔎 Ver primeras filas de patient"):
@@ -1077,15 +1219,17 @@ with st.expander("🔎 Ver primeras filas de patient"):
 st.subheader("📈 Visualización actual")
 _selected = st.session_state.get("viz", "Resumen 3x3")
 
+df_patient_region = merge_patient_with_region(df_patient, dfs["hospital"])
+
 if _selected == "Resumen 3x3":
-    fig, _ = plot_dashboard_3x3(df_patient)
+    fig, _ = plot_dashboard_3x3(df_patient, df_patient_region)
     render_plot(fig, "dashboard_3x3")
 elif _selected == "Estancia media UCI (Días)":
-    fig, _ = plot_hist_los(df_patient, bins=bins_hist, logy=logy_hist)
+    fig, _ = plot_hist_los(df_patient, line=density_hist, bins=bins_hist)
     render_plot(fig, "los_hist")
 elif _selected == "Estancia media UCI (Género)":
     try:
-        fig, _ = plot_box_by_gender(df_patient)
+        fig, _ = plot_violin_by_gender(df_patient)
         render_plot(fig, "los_box_genero")
     except Exception as e:
         st.warning(f"No se pudo generar el boxplot: {e}")
@@ -1096,38 +1240,39 @@ elif _selected == "Admisión":
     except Exception as e:
         st.warning(f"No se pudo generar el gráfico: {e}")
 elif _selected == "Estancia media UCI (Edad)":
-    fig, _ = plot_scatter_age_los(df_patient, trendline=trendline, method=method, add_kde=add_kde)
+    fig, _ = plot_scatter_age_los(df_patient, n_clusters=cluster_n, line=trendline)
     render_plot(fig, "age_vs_los")
-elif _selected == "Estancia media UCI (diagnosticos)":
+elif _selected == "Estancia media UCI (Diagnosticos)":
     try:
-        fig, _ = plot_bar_mean_by_dx(df_patient, top_n=top_n)
+        fig, _ = plot_bar_mean_by_dx(df_patient, top_n=top_n_diag)
         render_plot(fig, "los_por_diagnostico")
     except Exception as e:
         st.warning(f"No se pudo generar el gráfico: {e}")
-elif _selected == "Estancia media UCI":
+elif _selected == "Estancia media UCI (Hospital)":
     try:
-        fig, _ = plot_bar_mean_by_hospital(df_patient, top_n=top_n)
+        # fig, _ = plot_bar_mean_by_hospital(df_patient, top_n=top_n)
+        fig, _ = plot_patients_by_region(df_patient_region, top_n=top_n_hosp)
         render_plot(fig, "los_por_hospital")
     except Exception as e:
         st.warning(f"No se pudo generar el gráfico: {e}")
 elif _selected == "Ethnicity":
-    fig, _ = plot_violin_los_by_ethnicity(df_patient, top_n=5, min_count=20)
+    fig, _ = plot_box_los_by_ethnicity(df_patient, top_n=5, min_count=20)
     render_plot(fig, "los_por_etnia")
 elif _selected == "Height":
     fig, _ = plot_height_hist(df_patient, bins=40, density=density_height, clip=(120, 210))
     render_plot(fig, "altura_hist_kde")
 elif _selected == "Zona UCI":
-    fig, _ = plot_pie_hospital_admit_source(df_patient, top_n=5)
+    fig, _ = plot_pie_hospital_admit_source(df_patient, top_n=top_n_zone)
     render_plot(fig, "admission_pie")
-elif _selected == "Region":
-    if "hospital" not in dfs:
-        st.info("Sube `hospital.csv` o colócalo en el directorio de datos para ver este gráfico.")
-    else:
-        try:
-            df_patient_region = merge_patient_with_region(df_patient, dfs["hospital"])
-            fig, _ = plot_patients_by_region(df_patient_region)
-            render_plot(fig, "pacientes_por_region")
-        except Exception as e:
-            st.warning(f"No se pudo generar el gráfico por región: {e}")
+# elif _selected == "Region":
+#     if "hospital" not in dfs:
+#         st.info("Sube `hospital.csv` o colócalo en el directorio de datos para ver este gráfico.")
+#     else:
+#         try:
+#             df_patient_region = merge_patient_with_region(df_patient, dfs["hospital"])
+#             fig, _ = plot_patients_by_region(df_patient_region)
+#             render_plot(fig, "pacientes_por_region")
+#         except Exception as e:
+#             st.warning(f"No se pudo generar el gráfico por región: {e}")
 
 st.caption("Alejandro Cortijo Benito -- 2025 (alejandro.cortijo.benito@alumnos.upm.es)")
