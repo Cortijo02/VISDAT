@@ -8,6 +8,8 @@ from typing import Optional, Dict
 import numpy as np
 import pandas as pd
 import matplotlib
+import geopandas as gpd
+import unicodedata
 
 matplotlib.use("Agg")  # backend no interactivo para Streamlit
 
@@ -634,13 +636,12 @@ def plot_box_los_by_ethnicity(
     cmap: str = "tab20",
     colors: Optional[Dict[str, str]] = None,
     showfliers: bool = True,
-    annotate_median: bool = False,
 ):
     """
     Boxplot de estancia en UCI (icu_los_days) por etnia (ethnicity).
     - Filtra a las 'top_n' etnias más frecuentes y descarta grupos con < min_count.
     - Ordena las categorías por mediana de estancia (descendente).
-    - Colorea por categoría y añade leyenda consistente.
+    - Colorea por categoría y añade leyenda consistente (sin recuadro).
     """
     created = False
     if ax is None:
@@ -661,8 +662,10 @@ def plot_box_los_by_ethnicity(
     tmp = tmp[tmp["ethnicity"].isin(valid_eth)]
 
     if tmp.empty:
-        ax.text(0.5, 0.5, "Sin datos suficientes tras el filtrado",
-                ha="center", va="center", transform=ax.transAxes)
+        ax.text(
+            0.5, 0.5, "Sin datos suficientes tras el filtrado",
+            ha="center", va="center", transform=ax.transAxes
+        )
         ax.set_axis_off()
         return fig, ax
 
@@ -694,28 +697,25 @@ def plot_box_los_by_ethnicity(
         linewidth=1.5,
     )
 
-    if annotate_median:
-        medians = tmp.groupby("ethnicity")["icu_los_days"].median()
-        xs = range(len(order))
-        ys = [medians[e] for e in order]
-        ax.scatter(
-            xs, ys,
-            zorder=3,
-            s=40,
-            c=[color_map[e] for e in order],
-            edgecolor="black",
-            linewidths=0.6
-        )
-
-    ax.set_title("Estancia UCI por etnia (boxplot)")
+    ax.set_title("Estancia UCI por etnia", fontsize=13, weight="bold", pad=10)
     ax.set_xlabel("Etnia")
     ax.set_ylabel("Estancia UCI (días)")
     ax.grid(True, axis="y", linestyle="--", alpha=0.4)
     ax.set_xticklabels(order, rotation=25, ha="right")
 
-    handles = [mpatches.Patch(facecolor=color_map[e], edgecolor="black", label=e) for e in order]
-    ax.legend(handles=handles, title="Etnia", bbox_to_anchor=(1.02, 1),
-              loc="upper left", borderaxespad=0)
+    # --- Leyenda sin recuadro ---
+    handles = [
+        mpatches.Patch(facecolor=color_map[e], edgecolor="black", label=e)
+        for e in order
+    ]
+    ax.legend(
+        handles=handles,
+        title="Etnia",
+        bbox_to_anchor=(1.02, 1),
+        loc="upper left",
+        borderaxespad=0,
+        frameon=True,  
+    )
 
     if created:
         fig.tight_layout()
@@ -727,7 +727,14 @@ def plot_height_hist(
     bins: int = 40,
     density: bool = False,
     clip: tuple | None = (120, 210),
+    show_mean: bool = False,  
 ):
+    """
+    Histograma de altura de admisión (cm) con KDE y línea opcional de media.
+    - Quita el marco (spines) y usa estilo limpio.
+    - Muestra distribución por grupos (<170, 170–180, ≥180).
+    - Si show_mean=True, dibuja línea vertical con el valor medio.
+    """
     created = False
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 5))
@@ -735,7 +742,7 @@ def plot_height_hist(
     else:
         fig = ax.figure
 
-    # Altura -> cm
+    # Altura en cm
     h = pd.to_numeric(df.get("admissionheight"), errors="coerce")
     height_cm = np.where(h > 3, h, h * 100.0)
     height_cm = pd.Series(height_cm, index=df.index).dropna()
@@ -751,8 +758,7 @@ def plot_height_hist(
         return fig, ax
 
     counts, edges = np.histogram(height_cm.values, bins=bins, density=density)
-    bin_widths = np.diff(edges)
-    bin_width = float(bin_widths.mean())
+    bin_width = float(np.diff(edges).mean())
 
     tmp = pd.DataFrame({"height_cm": height_cm})
     bins_groups = [-np.inf, 170, 180, np.inf]
@@ -763,6 +769,8 @@ def plot_height_hist(
 
     multiple = "stack" if not density else "layer"
     stat = "density" if density else "count"
+
+    # --- Histograma principal ---
     sns.histplot(
         data=tmp,
         x="height_cm",
@@ -777,23 +785,61 @@ def plot_height_hist(
         legend=False,
     )
 
-    sns.kdeplot(height_cm.values, ax=ax, bw_method="scott", cut=0, linewidth=2)
+    # --- KDE en negro ---
+    sns.kdeplot(height_cm.values, ax=ax, bw_method="scott", cut=0, color="black", linewidth=2)
 
+    # Ajustar KDE si no es densidad
     if not density:
         line = ax.lines[-1]
         y = line.get_ydata()
         y_counts = y * len(height_cm) * bin_width
         line.set_ydata(y_counts)
 
-    present = [g for g in labels if g in tmp["height_group"].dropna().unique().tolist()]
-    if present:
-        handles = [Patch(facecolor=palette[g], edgecolor="black", label=g) for g in present]
-        ax.legend(handles=handles, title="Grupo de altura (cm)", loc="best")
+    # --- Línea y anotación de la media (opcional) ---
+    if show_mean:
+        mean_val = height_cm.mean()
+        ax.axvline(mean_val, color="red", linestyle="--", linewidth=2, label=f"Media: {mean_val:.1f} cm")
 
-    ax.set_title("Distribución de altura de admisión (cm)")
+        x_offset = (height_cm.max() - height_cm.min()) * 0.02
+        ymax = ax.get_ylim()[1]
+
+        ax.text(
+            mean_val + x_offset,
+            ymax * 0.9,
+            f"Media\n{mean_val:.1f} cm",
+            color="red",
+            ha="left",
+            va="center",
+            fontsize=9,
+            weight="bold",
+        )
+
+    # --- Leyenda de grupos ---
+    present = [g for g in labels if g in tmp["height_group"].dropna().unique().tolist()]
+    handles = [Patch(facecolor=palette[g], edgecolor="black", label=g) for g in present]
+
+    # Añadir media a la leyenda solo si se muestra
+    if show_mean:
+        mean_val = height_cm.mean()
+        handles.append(Patch(facecolor="none", edgecolor="red", label=f"Media: {mean_val:.1f} cm"))
+
+    ax.legend(
+        handles=handles,
+        title="Altura (cm)",
+        frameon=False,
+        loc="best",
+        fontsize=9,
+    )
+
+    # --- Estilo limpio ---
+    ax.set_title("Distribución de altura de admisión (cm)", fontsize=13, weight="bold", pad=10)
     ax.set_xlabel("Altura (cm)")
     ax.set_ylabel("Densidad" if density else "Frecuencia")
-    ax.grid(True, linestyle="--", alpha=0.35)
+
+    ax.grid(False)
+    for spine in ["top", "right", "left", "bottom"]:
+        ax.spines[spine].set_visible(False)
+    ax.set_facecolor("white")
 
     if created:
         fig.tight_layout()
@@ -946,16 +992,14 @@ def plot_dashboard_3x3(df, df_h):
 
     plot_hist_los(df, line=density_hist, bins=bins_hist, show_mean=mean_hist, show_median=median_hist, ax=axs[0, 0])
     plot_violin_by_gender(df, ax=axs[0, 1])
-    # plot_bar_admit_source(df, top_n=top_n, ax=axs[0, 2])
     plot_pie_hospital_admit_source(df, top_n=top_n_zone, ax=axs[0, 2])
 
     plot_scatter_age_los(df, n_clusters=cluster_n, line=trendline, ax=axs[1, 0])
     plot_bar_mean_by_dx(df, top_n=top_n_diag, ax=axs[1, 1])
-    plot_patients_by_region(df_h, top_n=top_n_hosp, ax=axs[1, 2])
+    plot_patients_by_region(df_h, ax=axs[1, 2])
 
-
-    plot_box_los_by_ethnicity(df, top_n=5, min_count=20, ax=axs[2, 0])
-    plot_height_hist(df, bins=40, density=density_height, clip=(120, 210), ax=axs[2, 1])
+    plot_box_los_by_ethnicity(df, top_n=5, min_count=20, showfliers=showfliers_boxplot, ax=axs[2, 0])
+    plot_height_hist(df, bins=40, density=density_height, show_mean=show_mean_height, clip=(120, 210), ax=axs[2, 1])
     plot_pie_hospital_admit_source(df, top_n=top_n_zone, ax=axs[2, 2])
 
     fig.tight_layout()
@@ -986,47 +1030,121 @@ def merge_patient_with_region(df_patient: pd.DataFrame, hospital_df: pd.DataFram
     return merged
 
 
-def plot_patients_by_region(df_patient_with_region: pd.DataFrame, top_n: int | None = None, ax=None):
+def _norm(s: str) -> str:
+    if s is None:
+        return ""
+    s = str(s).strip()
+    s = unicodedata.normalize("NFKD", s)
+    s = s.encode("ascii", "ignore").decode("ascii")
+    return s
+
+
+def plot_patients_by_region(df_patient_with_region: pd.DataFrame, ax=None, json_path: str = "/app/app/db/us-states.json"):
     """
-    Histograma de pacientes por región (categorías discretas).
-    - Si se pasa top_n, se muestran solo las top N regiones más frecuentes.
-    - Orden ascendente por recuento, como en la versión original.
+    Mapa de EE.UU. mostrando pacientes por región (Northeast, South, West, Midwest, _Unknown).
+    - Usa un GeoJSON local (json_path).
+    - Colorea cada región y muestra porcentajes.
+    - Normaliza nombres (_Unkhown -> _Unknown).
     """
+
     if "region" not in df_patient_with_region.columns:
-        raise ValueError("El DataFrame no tiene la columna 'region'. Ejecuta primero el merge.")
+        raise ValueError("El DataFrame no tiene la columna 'region'.")
 
-    series = df_patient_with_region["region"].fillna("Desconocido").astype(str)
+    # --- Normalizar nombres de región ---
+    raw = df_patient_with_region["region"].astype(str).map(_norm).str.lower()
+    mapping = {
+        "_unknown": "_Unknown",
+        "_unkhown": "_Unknown",
+        "unknown": "_Unknown",
+        "desconocido": "_Unknown",
+        "northeast": "Northeast",
+        "midwest": "Midwest",
+        "south": "South",
+        "west": "West",
+    }
+    df_patient_with_region = df_patient_with_region.copy()
+    df_patient_with_region["region"] = raw.map(mapping).fillna("_Unknown")
 
-    counts = series.value_counts()
-    if top_n is not None:
-        counts = counts.head(top_n)
-    counts = counts.sort_values(ascending=True)
+    # --- Contar pacientes por región ---
+    counts = df_patient_with_region["region"].value_counts()
+    total = int(counts.sum())
+    percents = (100 * counts / total).round(1)
 
-    cats = counts.index.tolist()
-    series = series[series.isin(cats)]
+    # --- Cargar el GeoJSON local ---
+    states = gpd.read_file(json_path)
 
-    cat = pd.Categorical(series, categories=cats, ordered=True)
-    codes = cat.codes  
+    # --- Asignar regiones (basado en U.S. Census Bureau) ---
+    northeast = {"Maine","New Hampshire","Vermont","Massachusetts","Rhode Island","Connecticut",
+                 "New York","New Jersey","Pennsylvania"}
+    midwest = {"Ohio","Indiana","Illinois","Michigan","Wisconsin",
+               "Minnesota","Iowa","Missouri","North Dakota","South Dakota","Nebraska","Kansas"}
+    south = {"Delaware","Maryland","District of Columbia","Virginia","West Virginia",
+             "North Carolina","South Carolina","Georgia","Florida",
+             "Kentucky","Tennessee","Alabama","Mississippi",
+             "Arkansas","Louisiana","Oklahoma","Texas"}
+    west = {"Montana","Idaho","Wyoming","Colorado","New Mexico",
+            "Arizona","Utah","Nevada","Washington","Oregon","California","Alaska","Hawaii"}
+
+    def assign_region(state):
+        if state in northeast:
+            return "Northeast"
+        elif state in midwest:
+            return "Midwest"
+        elif state in south:
+            return "South"
+        elif state in west:
+            return "West"
+        else:
+            return "_Unknown"
+
+    states["region"] = states["name"].apply(assign_region)
+
+    # --- Paleta y orden de leyenda ---
+    palette = {
+        "Northeast": "#1f77b4",
+        "Midwest": "#2ca02c",
+        "South": "#ff7f0e",
+        "West": "#9467bd",
+        "_Unknown": "#d3d3d3",
+    }
+    legend_order = ["Northeast", "Midwest", "South", "West", "_Unknown"]
 
     created = False
     if ax is None:
-        fig, ax = plt.subplots(figsize=(9, 5))
+        fig, ax = plt.subplots(figsize=(10, 6))
         created = True
     else:
         fig = ax.figure
 
-    bins = np.arange(len(cats) + 1) - 0.5
-    ax.hist(codes, bins=bins, edgecolor="black")
+    # --- Dibujar mapa ---
+    for region in legend_order:
+        color = palette[region]
+        states[states["region"] == region].plot(
+            ax=ax, color=color, edgecolor="white", linewidth=0.8, alpha=0.9
+        )
 
-    ax.set_xticks(range(len(cats)))
-    ax.set_xticklabels(cats, rotation=0)
-    ax.set_title("Pacientes por región")
-    ax.set_xlabel("Región")
-    ax.set_ylabel("Número de pacientes")
-    ax.grid(True, axis="y", linestyle="--", alpha=0.4)
+    # --- Título y estilo ---
+    ax.set_title(
+        "Distribución de pacientes por región de EE.UU.",
+        fontsize=13, weight="bold", pad=10
+    )
+    ax.axis("off")
 
-    for i, v in enumerate(counts.values):
-        ax.text(i, v, f" {v}", ha="center", va="bottom")
+    # --- Leyenda con colores + porcentaje ---
+    legend_elements = []
+    for region in legend_order:
+        pct = float(percents.get(region, 0.0))
+        label = f"{region} ({pct:.2f}%)"
+        patch = Patch(facecolor=palette[region], edgecolor="black", label=label)
+        legend_elements.append(patch)
+
+    ax.legend(
+        handles=legend_elements,
+        title="Región EE.UU.",
+        frameon=False,
+        loc="lower left",
+        fontsize=9,
+    )
 
     if created:
         fig.tight_layout()
@@ -1117,7 +1235,7 @@ with st.sidebar:
 
     with st.sidebar:
         top_n_zone = st.number_input(
-            "Top N zonas",
+            "Top N zonas admisiones",
             min_value=2,
             max_value=8,
             value=5,
@@ -1128,15 +1246,24 @@ with st.sidebar:
     top_n = st.slider("Top N categorías admisiones", 3, 13, 8)
 
     cluster_n = st.slider("N clusters (Edad vs Estancia UCI)", 2, 5, 3) 
-    opcion = st.selectbox("Tendencia scatter", ["Ninguna", "Mediana", "Media"], index=0)
+    opcion = st.selectbox("Añadir tendencia:", ["Ninguna", "Mediana", "Media"], index=0)
     trendline = {"Ninguna": None, "Mediana": "median", "Media": "mean"}[opcion]
 
     top_n_diag = st.slider("Top N categorías diagnosticos", 3, 10, 8)
-    top_n_hosp = st.slider("Top N hospitales", 2, 5, 3)
 
-    density_height = st.checkbox("Normalizar altura", value=False)
+    showfliers_boxplot = st.radio(
+        "Mostrar valores atípicos en boxplots:",
+        ["No", "Sí"],
+        index=0,
+        horizontal=True,
+    ) == "Sí"
 
-
+    col_plot1, col_plot2= st.columns(2)
+    with col_plot1:
+        density_height = st.checkbox("Normalizar altura", value=False)
+    with col_plot2:
+        show_mean_height = st.checkbox("Mostrar media altura", value=False)
+    
 # -----------------------------
 # Carga de datos
 # -----------------------------
@@ -1335,15 +1462,15 @@ elif _selected == "Estancia media UCI (Diagnosticos)":
         st.warning(f"No se pudo generar el gráfico: {e}")
 elif _selected == "Estancia media UCI (Hospital)":
     try:
-        fig, _ = plot_patients_by_region(df_patient_region, top_n=top_n_hosp)
+        fig, _ = plot_patients_by_region(df_patient_region)
         render_plot(fig, "los_por_hospital")
     except Exception as e:
         st.warning(f"No se pudo generar el gráfico: {e}")
 elif _selected == "Ethnicity":
-    fig, _ = plot_box_los_by_ethnicity(df_patient, top_n=5, min_count=20)
+    fig, _ = plot_box_los_by_ethnicity(df_patient, showfliers=showfliers_boxplot, top_n=5, min_count=20)
     render_plot(fig, "los_por_etnia")
 elif _selected == "Height":
-    fig, _ = plot_height_hist(df_patient, bins=40, density=density_height, clip=(120, 210))
+    fig, _ = plot_height_hist(df_patient, bins=40, density=density_height, show_mean=show_mean_height, clip=(120, 210))
     render_plot(fig, "altura_hist_kde")
 elif _selected == "Zona UCI":
     fig, _ = plot_pie_hospital_admit_source(df_patient, top_n=top_n_zone)
