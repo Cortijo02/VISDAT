@@ -1381,14 +1381,18 @@ if st.session_state.get("_page") == "predicciones":
         "de su estancia en UCI con el **model_VotingRegressor.joblib**."
     )
 
-    colp1, colp2 = st.columns(2)
-    with colp1:
-        path_xtest_csv = st.text_input("Ruta a X_test.csv", value="/app/app/src/test/X_test.csv")
-        path_sparse = st.text_input("Ruta a X_T_test.npz (matriz dispersa)", value="/app/app/src/test/X_T_test.npz")
-        path_ytest = st.text_input("Ruta a y_test.csv (opcional)", value="/app/app/src/test/y_test.csv")
-    with colp2:
-        model_path = st.text_input("Ruta a model_VotingRegressor.joblib", value="/app/app/src/models/model_VotingRegressor.joblib")
-        up_model = st.file_uploader("Subir model_VotingRegressor.joblib (opcional)", type=["joblib", "pkl"])
+    path_xtest_csv = "/app/app/src/test/X_test.csv"
+    path_sparse = "/app/app/src/test/X_T_test.npz"
+    path_ytest = "/app/app/src/test/y_test.csv"
+    model_path = "/app/app/src/models/model_VotingRegressor.joblib"
+
+    # 🔹 Solo mostramos el uploader del modelo
+    st.subheader("📦 Cargar modelo")
+    up_model = st.file_uploader(
+        "Subir model_VotingRegressor.joblib (opcional)",
+        type=["joblib", "pkl"],
+        help="Si se proporciona, se usará este modelo en lugar del guardado por defecto."
+    )
 
     df_xtest = None
     try:
@@ -1422,7 +1426,7 @@ if st.session_state.get("_page") == "predicciones":
             idx = int(df_xtest.index[df_xtest[id_col].astype(str) == str(sel_id)][0])
             st.caption(f"Fila seleccionada: índice {idx}")
         else:
-            idx = st.number_input("Fila (0-index)", min_value=0, max_value=max(0, len(df_xtest)-1), value=0, step=1)
+            idx = st.number_input("Selecciona una fila (0-index) del conjunto de test para hacer inferencia", min_value=0, max_value=max(0, len(df_xtest)-1), value=0, step=1)
 
         with st.expander("🔎 Vista rápida de X_test.csv"):
             st.dataframe(df_xtest.head(50), use_container_width=True)
@@ -1465,7 +1469,7 @@ if st.session_state.get("_page") == "predicciones":
                 if y_test is not None and len(y_test) > row_idx:
                     gt = float(y_test.iloc[row_idx]) if hasattr(y_test, 'iloc') else float(y_test[row_idx])
                     st.info(f"Ground truth fila {row_idx}: **{gt:.3f}** (minutos)")
-                    st.metric("Error absoluto", value=f"{abs(gt - y_hat):.3f}")
+                    st.metric("Error absoluto", value=f"{abs(gt - y_hat):.3f} minutos")
             except Exception as e:
                 st.error(f"No se pudo predecir la fila {idx}: {e}")
 
@@ -1481,8 +1485,8 @@ if st.session_state.get("_page") == "predicciones":
                         try:
                             mae = mean_absolute_error(y_test, pred)
                             r2 = r2_score(y_test, pred)
-                            st.write(f"**MAE test:** {mae:.4f}")
-                            st.write(f"**R² test:** {r2:.4f}")
+                            st.write(f"**MAE test:** {mae:.4f} minutos")
+                            st.write(f"**R² test:** {r2:.4f} minutos")
                         except Exception as e:
                             st.warning(f"No pude calcular métricas: {e}")
                     elif y_test is not None:
