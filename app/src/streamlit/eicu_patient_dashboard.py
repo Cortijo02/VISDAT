@@ -14,6 +14,8 @@ matplotlib.use("Agg")  # backend no interactivo para Streamlit
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.patches import Patch
+import matplotlib.patheffects as path_effects
+
 import seaborn as sns
 
 import streamlit as st
@@ -127,7 +129,21 @@ def top_n_index(s: pd.Series, n: int) -> pd.Index:
 # Plots
 # -----------------------------
 
-def plot_hist_los(df: pd.DataFrame, bins: int = 50, logy: bool = False, ax=None, line: bool = False):
+def plot_hist_los(
+    df: pd.DataFrame,
+    bins: int = 50,
+    logy: bool = False,
+    ax=None,
+    line: bool = False,
+    show_mean: bool = False,
+    show_median: bool = False,
+):
+    """
+    Histograma de estancia en UCI (días).
+    - line=True añade curva de densidad (tendencia)
+    - show_mean/median controlan si se muestran las líneas y anotaciones
+    - Leyenda adaptativa según los elementos visibles
+    """
     if "icu_los_days" not in df.columns:
         raise ValueError("Falta la columna 'icu_los_days'.")
 
@@ -139,24 +155,96 @@ def plot_hist_los(df: pd.DataFrame, bins: int = 50, logy: bool = False, ax=None,
         fig = ax.figure
 
     x = pd.to_numeric(df["icu_los_days"], errors="coerce").dropna()
+    if len(x) == 0:
+        ax.text(0.5, 0.5, "Sin datos válidos", ha="center", va="center", transform=ax.transAxes)
+        if created:
+            fig.tight_layout()
+        return fig, ax
 
+    # Histograma
     density = bool(line)
-    ax.hist(x, bins=bins, edgecolor="black", alpha=0.4, density=density)
+    counts, edges, _ = ax.hist(
+        x,
+        bins=bins,
+        edgecolor="black",
+        alpha=0.65,
+        color="#5DADE2",
+        density=density,
+        linewidth=0.8,
+        label="Frecuencia" if not density else "Densidad",
+    )
 
+    # KDE opcional
+    handles, labels = ax.get_legend_handles_labels()
     if line:
-        sns.kdeplot(x=x, ax=ax, linewidth=2, color="blue", bw_method="scott", cut=0)
+        sns.kdeplot(
+            x=x,
+            ax=ax,
+            linewidth=2,
+            color="#1A5276",
+            bw_method="scott",
+            cut=0,
+            label="Tendencia",
+        )
+        ax.set_ylabel("Densidad")
+    else:
+        ax.set_ylabel("Frecuencia")
 
-    ax.set_title("Histograma de estancia en UCI (días)")
-    ax.set_xlabel("Estancia UCI (días)")
-    ax.set_ylabel("Densidad" if density else "Frecuencia")
-    ax.grid(True, linestyle="--", alpha=0.4)
+    ymax = counts.max() * (1.1 if not density else 1.3)
+
+    # Media
+    if show_mean:
+        mean_val = x.mean()
+        ax.axvline(mean_val, color="#E74C3C", linestyle="--", linewidth=2, label=f"Media: {mean_val:.1f}")
+        ax.annotate(
+            f"Media = {mean_val:.1f} días",
+            xy=(mean_val, ymax * 0.55),
+            xytext=(mean_val + (x.max() * 0.05), ymax * 0.55),
+            arrowprops=dict(arrowstyle="->", lw=1.2, color="#E74C3C"),
+            fontsize=9,
+            color="#E74C3C",
+            ha="left",
+            va="center",
+        )
+
+    # Mediana
+    if show_median:
+        median_val = x.median()
+        ax.axvline(median_val, color="#27AE60", linestyle="-.", linewidth=2, label=f"Mediana: {median_val:.1f}")
+        ax.annotate(
+            f"Mediana = {median_val:.1f} días",
+            xy=(median_val, ymax * 0.75),
+            xytext=(median_val + (x.max() * 0.05), ymax * 0.75),
+            arrowprops=dict(arrowstyle="->", lw=1.2, color="#27AE60"),
+            fontsize=9,
+            color="#27AE60",
+            ha="left",
+            va="center",
+        )
+
+    # Estilo visual limpio
+    ax.set_title("Distribución de la estancia en UCI", fontsize=13, weight="bold", pad=10)
+    ax.set_xlabel("Estancia (días)", fontsize=11)
+    ax.tick_params(axis="both", which="major", labelsize=10)
+    ax.set_facecolor("white")
+
+    for spine in ["top", "right"]:
+        ax.spines[spine].set_visible(False)
+    ax.spines["left"].set_alpha(0.6)
+    ax.spines["bottom"].set_alpha(0.6)
+
+    # Leyenda solo con elementos activos
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(handles, labels, frameon=False, fontsize=9, loc="upper right")
+
     if logy:
         ax.set_yscale("log")
 
     if created:
         fig.tight_layout()
-    return fig, ax
 
+    return fig, ax
 
 def plot_bar_admit_source(
     df: pd.DataFrame,
@@ -261,7 +349,6 @@ def plot_bar_admit_source(
         fig.tight_layout()
     return fig, ax
 
-
 def plot_scatter_age_los(
     df: pd.DataFrame,
     n_clusters: int = 3,
@@ -270,15 +357,14 @@ def plot_scatter_age_los(
     line: str = "median",  # "median" | "mean" | None
 ):
     """
-    Scatter de edad (x) vs estancia UCI (y) con:
-      - Clustering KMeans para colorear puntos.
-      - Línea vertical en la mediana (o media) de la edad.
-    Sin regresiones ni suavizados.
-
-    Requisitos mínimos: columnas 'age_years' y 'icu_los_days'.
+    Scatter de edad (x) vs estancia en UCI (y) con:
+      - Clustering KMeans coloreado por cluster.
+      - Línea vertical en la mediana o media de edad.
+      - Líneas divisorias entre clusters y centroides marcados.
+      - Valor de la línea mostrado a la derecha.
     """
     if not {"age_years", "icu_los_days"} <= set(df.columns):
-        raise ValueError("Faltan columnas: se requieren 'age_years' y 'icu_los_days'.")
+        raise ValueError("Faltan columnas requeridas: 'age_years' y 'icu_los_days'.")
 
     tmp = df[["age_years", "icu_los_days"]].dropna()
     if len(tmp) == 0:
@@ -289,16 +375,10 @@ def plot_scatter_age_los(
 
     n_clusters = max(1, min(n_clusters, len(tmp)))
 
-    try:
-        km = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
-        labels = km.fit_predict(tmp[["age_years", "icu_los_days"]].to_numpy())
-    except Exception:
-        labels = pd.qcut(
-            tmp["age_years"].rank(method="first"),
-            q=n_clusters,
-            labels=False,
-            duplicates="drop",
-        ).to_numpy()
+    # --- KMeans ---
+    km = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
+    labels = km.fit_predict(tmp[["age_years", "icu_los_days"]].to_numpy())
+    centers = km.cluster_centers_
 
     created = False
     if ax is None:
@@ -307,31 +387,92 @@ def plot_scatter_age_los(
     else:
         fig = ax.figure
 
-    for k in range(len(np.unique(labels))):
+    # --- Colores y símbolos ---
+    palette = sns.color_palette("Set2", n_colors=n_clusters)
+    roman_map = {1: "I", 2: "II", 3: "III", 4: "IV", 5: "V"}
+
+    # --- Dibujar regiones de cluster (contornos suaves) ---
+    x_min, x_max = tmp["age_years"].min() - 2, tmp["age_years"].max() + 2
+    y_min, y_max = tmp["icu_los_days"].min() - 1, tmp["icu_los_days"].max() + 1
+
+    xx, yy = np.meshgrid(
+        np.linspace(x_min, x_max, 300),
+        np.linspace(y_min, y_max, 300)
+    )
+    Z = km.predict(np.c_[xx.ravel(), yy.ravel()])
+    Z = Z.reshape(xx.shape)
+
+    # Fondo y líneas divisorias
+    ax.contourf(xx, yy, Z, alpha=0.08, cmap="Set2", levels=n_clusters)
+    ax.contour(xx, yy, Z, colors="gray", linewidths=0.8, linestyles="--", alpha=0.6)
+
+    # --- Puntos por cluster ---
+    for k in range(n_clusters):
         sub = tmp[labels == k]
         ax.scatter(
             sub["age_years"],
             sub["icu_los_days"],
             s=16,
-            alpha=0.5,
-            label=f"Cluster {k+1}",
-            zorder=1,
+            alpha=0.55,
+            color=palette[k],
+            label=f"Cluster {roman_map.get(k + 1, str(k + 1))}",
+            zorder=2,
         )
 
+    # --- Centroides ---
+    ax.scatter(
+        centers[:, 0],
+        centers[:, 1],
+        color="black",
+        marker="X",
+        s=120,
+        edgecolor="white",
+        linewidth=1.2,
+        label="Centroides",
+        zorder=4,
+    )
+
+    # --- Línea vertical (media o mediana) con valor ---
     if line in ("median", "mean"):
         xval = tmp["age_years"].median() if line == "median" else tmp["age_years"].mean()
-        ax.axvline(xval, linestyle="--", linewidth=2, label=f"{'Mediana' if line=='median' else 'Media'} edad", zorder=2)
+        label_text = f"{'Mediana' if line == 'median' else 'Media'} edad"
+        ax.axvline(
+            xval,
+            linestyle="--",
+            linewidth=2,
+            color="black",
+            label=label_text,
+            zorder=3,
+        )
 
-    ax.set_title("Edad vs estancia en UCI (clusters)")
+        # Mostrar el valor numérico a la derecha de la línea
+        y_text = tmp["icu_los_days"].max() * 0.95  # altura relativa
+        ax.text(
+            xval + (tmp["age_years"].max() - tmp["age_years"].min()) * 0.01,  # leve desplazamiento a la derecha
+            y_text,
+            f"{xval:.1f} años",
+            rotation=90,
+            va="top",
+            ha="left",
+            fontsize=9,
+            color="black",
+            weight="bold",
+            backgroundcolor="white",
+            zorder=5,
+        )
+
+    # --- Estilo y formato ---
+    ax.set_title("Edad vs estancia en UCI (clusters)", fontsize=13, weight="bold", pad=10)
     ax.set_xlabel("Edad (años)")
     ax.set_ylabel("Estancia UCI (días)")
-    ax.grid(True, linestyle="--", alpha=0.4)
-    ax.legend(loc="best")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.grid(False)
+    ax.legend(frameon=False, loc="best", fontsize=9)
 
     if created:
         fig.tight_layout()
     return fig, ax
-
 
 def plot_violin_by_gender(df, ax=None, order=None):
     """
@@ -364,37 +505,104 @@ def plot_violin_by_gender(df, ax=None, order=None):
         ax=ax
     )
 
-    ax.set_title("Estancia en UCI por género")
+    ax.set_title("Estancia en UCI por género", fontsize=13, weight="bold", pad=10)
     ax.set_xlabel("Género")
     ax.set_ylabel("Estancia UCI (días)")
-    ax.grid(True, linestyle="--", alpha=0.4)
+    ax.grid(False)  
 
     if created:
         fig.tight_layout()
     return fig, ax
 
-
-def plot_bar_mean_by_dx(df: pd.DataFrame, top_n: int = 8, ax=None):
+def plot_bar_mean_by_dx(
+    df: pd.DataFrame,
+    top_n: int = 8,
+    hue_col: str | None = "apacheadmissiondx",
+    ax=None,
+    annotate: bool = True,
+):
+    """
+    Muestra la estancia media en UCI por diagnóstico (apacheadmissiondx),
+    coloreando cada barra con un color distinto y sin cuadrícula.
+    """
     if "apacheadmissiondx" not in df.columns:
         raise ValueError("Falta la columna 'apacheadmissiondx'.")
+
+    data = df.copy()
+    data["apacheadmissiondx"] = data["apacheadmissiondx"].fillna("Desconocido")
+
+    if hue_col is not None:
+        if hue_col not in data.columns:
+            raise ValueError(f"Falta la columna de hue '{hue_col}'.")
+        data[hue_col] = data[hue_col].fillna("Desconocido")
+
+    # Seleccionar top diagnósticos más frecuentes
+    top_categories = (
+        data["apacheadmissiondx"].value_counts().head(top_n).index.tolist()
+    )
+    data = data[data["apacheadmissiondx"].isin(top_categories)]
+
     created = False
     if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 5))
+        fig, ax = plt.subplots(figsize=(9, 7))
         created = True
     else:
         fig = ax.figure
 
-    top = top_n_index(df["apacheadmissiondx"], n=top_n)
-    tmp = df[df["apacheadmissiondx"].isin(top)].copy()
-    med = (tmp.groupby("apacheadmissiondx")["icu_los_days"].mean().sort_values(ascending=True))
-    ax.barh(med.index, med.values, edgecolor="black")
-    ax.set_title(f"Estancia media por diagnóstico (top {top_n})")
-    ax.set_xlabel("Estancia media (días)")
-    ax.grid(True, axis="x", linestyle="--", alpha=0.4)
+    # Calcular estancia media y preparar DataFrame
+    plot_df = (
+        data.groupby("apacheadmissiondx", as_index=False)["icu_los_days"]
+        .mean()
+        .rename(columns={"icu_los_days": "mean_los"})
+    )
+    plot_df = plot_df.sort_values("mean_los", ascending=False)
+
+    # Dibujar barras
+    sns.barplot(
+        data=plot_df,
+        x="apacheadmissiondx",
+        y="mean_los",
+        hue=hue_col,
+        order=plot_df["apacheadmissiondx"],
+        dodge=False,
+        ax=ax,
+    )
+
+    # Estilo limpio (sin grid)
+    ax.set_facecolor("white")
+    ax.grid(False)
+    for spine in ["top", "right"]:
+        ax.spines[spine].set_visible(False)
+    ax.spines["left"].set_alpha(0.6)
+    ax.spines["bottom"].set_alpha(0.6)
+
+    # Títulos y ejes
+    ax.set_title(f"Estancia media en UCI por diagnóstico (Top {top_n})", fontsize=13, weight="bold", pad=10)
+    ax.set_xlabel("Diagnóstico de admisión", fontsize=11)
+    ax.set_ylabel("Estancia media (días)", fontsize=11)
+    plt.setp(ax.get_xticklabels(), rotation=25, ha="right")
+
+    # Anotaciones opcionales
+    if annotate:
+        try:
+            for container in ax.containers:
+                ax.bar_label(container, fmt="%.1f", padding=2, fontsize=9)
+        except Exception:
+            for p in ax.patches:
+                h = p.get_height()
+                ax.annotate(
+                    f"{h:.1f}",
+                    (p.get_x() + p.get_width() / 2.0, h),
+                    ha="center",
+                    va="bottom",
+                    fontsize=9,
+                    xytext=(0, 2),
+                    textcoords="offset points",
+                )
+
     if created:
         fig.tight_layout()
     return fig, ax
-
 
 def plot_bar_mean_by_hospital(df: pd.DataFrame, top_n: int = 8, ax=None):
     if "hospitalid" not in df.columns:
@@ -513,7 +721,6 @@ def plot_box_los_by_ethnicity(
         fig.tight_layout()
     return fig, ax
 
-
 def plot_height_hist(
     df: pd.DataFrame,
     ax=None,
@@ -592,20 +799,25 @@ def plot_height_hist(
         fig.tight_layout()
     return fig, ax
 
-
 def plot_pie_hospital_admit_source(
     df: pd.DataFrame,
     top_n: int = 5,
     ax=None,
     show_counts: bool = True,
     label_radius: float = 1.28,
-    line_radius: float = 1.02,
+    line_radius: float = 0.85,
     min_sep: float = 0.125,
     clip_low: float = -0.125,
     clip_high: float = 0.90,
     title_y: float = 1.06,
     top_adjust: float = 0.88,
 ):
+    """
+    Pie chart de fuentes de admisión hospitalaria equilibrado visualmente.
+    - Las flechas parten del centro del pastel.
+    - Las etiquetas se superponen sobre las líneas.
+    - El ángulo se ajusta automáticamente para balancear lados.
+    """
     created = False
     if ax is None:
         fig, ax = plt.subplots(figsize=(9, 6))
@@ -625,13 +837,22 @@ def plot_pie_hospital_admit_source(
     total = vals.sum()
     pcts = (100.0 * vals / total) if total > 0 else np.zeros_like(vals, dtype=float)
 
-    wedges, _ = ax.pie(vals, startangle=90, counterclock=False, labels=None, autopct=None)
+    # === Ángulo de inicio balanceado ===
+    # Buscar el ángulo del sector más grande y colocarlo centrado abajo
+    largest_idx = int(np.argmax(vals))
+
+    cumulative = np.cumsum(vals) / total * 360
+    center_angle = (cumulative[largest_idx] - vals[largest_idx] / total * 180)
+    startangle = 270 - center_angle  
+
+    wedges, _ = ax.pie(vals, startangle=startangle, counterclock=False, labels=None, autopct=None)
     ax.axis("equal")
 
+    # --- función de separación vertical sin solapamientos ---
     def _spread_on_side(items, min_sep, low, high):
         if not items:
             return
-        items.sort(key=lambda d: d["y"])  # ordenar por y original
+        items.sort(key=lambda d: d["y"])
         items[0]["y_adj"] = float(np.clip(items[0]["y"], low, high))
         for i in range(1, len(items)):
             yi = max(items[i]["y"], items[i - 1]["y_adj"] + min_sep)
@@ -651,12 +872,16 @@ def plot_pie_hospital_admit_source(
         rad = np.deg2rad(theta)
         x = float(np.cos(rad))
         y = float(np.sin(rad))
-        item = {"theta": theta, "x": x, "y": y, "lab": lab, "pct": pct, "n": int(n)}
+        item = {"theta": theta, "x": x, "y": y, "lab": lab, "pct": pct, "n": int(n), "color": wedge.get_facecolor()}
         (right_items if x >= 0 else left_items).append(item)
 
     _spread_on_side(right_items, min_sep=min_sep, low=clip_low, high=clip_high)
     _spread_on_side(left_items, min_sep=min_sep, low=clip_low, high=clip_high)
 
+    n_labels = len(labels)
+    rad_curve = 0.25 if n_labels <= 6 else 0.15 if n_labels <= 10 else 0.08
+
+    # --- dibujar anotaciones ---
     for items, side in ((right_items, "right"), (left_items, "left")):
         for it in items:
             x, y, y_adj = it["x"], it["y"], it["y_adj"]
@@ -669,37 +894,60 @@ def plot_pie_hospital_admit_source(
             if show_counts:
                 txt += f" (n={it['n']})"
 
+            # Flecha (debajo)
             ax.annotate(
-                txt,
-                xy=xy,
+                "",
                 xytext=(tx, ty),
-                ha=ha,
-                va="center",
+                xy=xy,
                 textcoords="data",
                 arrowprops=dict(
                     arrowstyle="-",
-                    lw=1.2,
+                    lw=1.1,
+                    color="black",
+                    alpha=0.8,
                     shrinkA=0,
                     shrinkB=0,
-                    connectionstyle=f"angle3,angleA=0,angleB={it['theta']}",
+                    connectionstyle=f"arc3,rad={rad_curve}",
+                    zorder=1,
                 ),
-                bbox=dict(boxstyle="round,pad=0.25", fc="white", ec="gray", alpha=0.85),
-                zorder=1,
             )
 
-    ax.set_title(f"Máxima ocupación ({top_n})", y=title_y)
+            # Texto (encima, con borde blanco)
+            text = ax.text(
+                tx,
+                ty,
+                txt,
+                ha=ha,
+                va="center",
+                fontsize=9,
+                color="black",
+                zorder=3,
+                bbox=dict(boxstyle="round,pad=0.25", fc="white", ec="gray", alpha=0.9),
+            )
+            text.set_path_effects([
+                path_effects.Stroke(linewidth=3, foreground="white"),
+                path_effects.Normal(),
+            ])
+
+    ax.set_title(
+        f"Distribución de admisión hospitalaria (Top {top_n})",
+        y=title_y,
+        fontsize=13,
+        weight="bold",
+    )
+
     if created:
         fig.subplots_adjust(top=top_adjust)
     return fig, ax
-
 
 def plot_dashboard_3x3(df, df_h):
     fig, axs = plt.subplots(3, 3, figsize=(25, 18))
     axs = np.asarray(axs)
 
-    plot_hist_los(df, line=density_hist, bins=bins_hist, ax=axs[0, 0])
+    plot_hist_los(df, line=density_hist, bins=bins_hist, show_mean=mean_hist, show_median=median_hist, ax=axs[0, 0])
     plot_violin_by_gender(df, ax=axs[0, 1])
-    plot_bar_admit_source(df, top_n=top_n, ax=axs[0, 2])
+    # plot_bar_admit_source(df, top_n=top_n, ax=axs[0, 2])
+    plot_pie_hospital_admit_source(df, top_n=top_n_zone, ax=axs[0, 2])
 
     plot_scatter_age_los(df, n_clusters=cluster_n, line=trendline, ax=axs[1, 0])
     plot_bar_mean_by_dx(df, top_n=top_n_diag, ax=axs[1, 1])
@@ -837,9 +1085,7 @@ with st.sidebar:
         if st.button("Predicciones", use_container_width=True):
             st.session_state["_page"] = "predicciones"
 
-    st.header("⚙️ Configuración de datos")
-    default_dir = st.session_state.get("_data_dir", "/app/app/db/csv_clean")
-    data_dir = st.text_input("Directorio con CSV", value=default_dir, help="Debe contener patient.csv y (opcional) hospital.csv")
+    data_dir = "/app/app/db/csv_clean"
     st.session_state["_data_dir"] = data_dir
 
     st.markdown("---")
@@ -860,7 +1106,24 @@ with st.sidebar:
 
     st.header("🎛️ Parámetros de gráficos")
     bins_hist = st.slider("Bins histograma estacia media", 10, 150, 50, step=5)
-    density_hist = st.checkbox("Tendencia", value=False)
+
+    col_plot1, col_plot2, col_plot3 = st.columns(3)
+    with col_plot1:
+        density_hist = st.checkbox("Tendencia", value=False)
+    with col_plot2:
+        mean_hist = st.checkbox("Media", value=False)
+    with col_plot3:
+        median_hist = st.checkbox("Mediana", value=False)
+
+    with st.sidebar:
+        top_n_zone = st.number_input(
+            "Top N zonas",
+            min_value=2,
+            max_value=8,
+            value=5,
+            step=1,
+            help="Número de zonas a mostrar en el pie. (max 8)"
+        )
 
     top_n = st.slider("Top N categorías admisiones", 3, 13, 8)
 
@@ -873,15 +1136,6 @@ with st.sidebar:
 
     density_height = st.checkbox("Normalizar altura", value=False)
 
-    with st.sidebar:
-        top_n_zone = st.number_input(
-            "Top N zonas",
-            min_value=2,
-            max_value=8,
-            value=5,
-            step=1,
-            help="Número de zonas a mostrar en el pie. (max 8)"
-        )
 
 # -----------------------------
 # Carga de datos
@@ -1056,7 +1310,7 @@ if _selected == "Resumen 3x3":
     fig, _ = plot_dashboard_3x3(df_patient, df_patient_region)
     render_plot(fig, "dashboard_3x3")
 elif _selected == "Estancia media UCI (Días)":
-    fig, _ = plot_hist_los(df_patient, line=density_hist, bins=bins_hist)
+    fig, _ = plot_hist_los(df_patient, line=density_hist, bins=bins_hist, show_mean=mean_hist, show_median=median_hist)
     render_plot(fig, "los_hist")
 elif _selected == "Estancia media UCI (Género)":
     try:
@@ -1066,8 +1320,8 @@ elif _selected == "Estancia media UCI (Género)":
         st.warning(f"No se pudo generar el boxplot: {e}")
 elif _selected == "Admisión":
     try:
-        fig, _ = plot_bar_admit_source(df_patient, top_n=top_n)
-        render_plot(fig, "admission_source")
+        fig, _ = plot_pie_hospital_admit_source(df_patient, top_n=top_n_zone)
+        render_plot(fig, "admission_pie")
     except Exception as e:
         st.warning(f"No se pudo generar el gráfico: {e}")
 elif _selected == "Estancia media UCI (Edad)":
