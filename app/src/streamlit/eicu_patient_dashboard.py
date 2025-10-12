@@ -1307,9 +1307,9 @@ with st.sidebar:
     with col_plot1:
         density_hist = st.checkbox("Tendencia", value=False)
     with col_plot2:
-        mean_hist = st.checkbox("Media", value=False)
+        mean_hist = st.checkbox("Media", value=True)
     with col_plot3:
-        median_hist = st.checkbox("Mediana", value=False)
+        median_hist = st.checkbox("Mediana", value=True)
 
     with st.sidebar:
         top_n_zone = st.number_input(
