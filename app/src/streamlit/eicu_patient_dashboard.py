@@ -70,11 +70,14 @@ def load_tables(data_dir: str) -> Dict[str, pd.DataFrame]:
     dfs: Dict[str, pd.DataFrame] = {}
     p_path = os.path.join(data_dir, "patient.csv")
     h_path = os.path.join(data_dir, "hospital.csv")
+    c_path = os.path.join(data_dir, "carePlanGoal.csv")
 
     if os.path.exists(p_path):
         dfs["patient"] = read_csv_safe(p_path)
     if os.path.exists(h_path):
         dfs["hospital"] = read_csv_safe(h_path)
+    if os.path.exists(c_path):
+        dfs["carePlanGoal"] = read_csv_safe(c_path)
     return dfs
 
 # Utilidad: carga matriz dispersa .npz (scipy)
@@ -1000,7 +1003,7 @@ def plot_dashboard_3x3(df, df_h):
 
     plot_box_los_by_ethnicity(df, top_n=5, min_count=20, showfliers=showfliers_boxplot, ax=axs[2, 0])
     plot_height_hist(df, bins=40, density=density_height, show_mean=show_mean_height, clip=(120, 210), ax=axs[2, 1])
-    plot_pie_hospital_admit_source(df, top_n=top_n_zone, ax=axs[2, 2])
+    plot_careplan_counts(carPlan_raw, top_n=top_n_care, ax=axs[2, 2])
 
     fig.tight_layout()
     return fig, axs
@@ -1029,7 +1032,6 @@ def merge_patient_with_region(df_patient: pd.DataFrame, hospital_df: pd.DataFram
         merged = merged.rename(columns={region_col: "region"})
     return merged
 
-
 def _norm(s: str) -> str:
     if s is None:
         return ""
@@ -1037,7 +1039,6 @@ def _norm(s: str) -> str:
     s = unicodedata.normalize("NFKD", s)
     s = s.encode("ascii", "ignore").decode("ascii")
     return s
-
 
 def plot_patients_by_region(df_patient_with_region: pd.DataFrame, ax=None, json_path: str = "/app/app/db/us-states.json"):
     """
@@ -1151,6 +1152,83 @@ def plot_patients_by_region(df_patient_with_region: pd.DataFrame, ax=None, json_
     return fig, ax
 
 # -----------------------------
+# Global Care UCI (carePlanGoal.csv)
+# -----------------------------
+
+def plot_careplan_counts(
+    df: pd.DataFrame,
+    ax=None,
+    top_n: int | None = None,
+    min_count: int = 1,
+    title: str = "Frecuencia de Planes de Cuidado (Care Plans)",
+):
+    """
+    Gráfico de barras de frecuencia de aparición de Care Plans.
+    
+    - Cuenta cuántos pacientes tienen valor > 0 por tipo de Care Plan.
+    - Elimina el prefijo 'Care_' de los nombres de columna.
+    - Permite filtrar por mínimo conteo (min_count) o limitar a los top N.
+    - Devuelve fig, ax al estilo plot_height_hist.
+    """
+
+    created = False
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 5))
+        created = True
+    else:
+        fig = ax.figure
+
+    # --- Validar columnas ---
+    care_cols = [c for c in df.columns if c != "patientunitstayid"]
+    if not care_cols:
+        ax.text(0.5, 0.5, "Sin columnas válidas", ha="center", va="center", transform=ax.transAxes)
+        if created:
+            fig.tight_layout()
+        return fig, ax
+
+    # --- Calcular conteos ---
+    care_counts = (df[care_cols] > 0).sum().reset_index()
+    care_counts.columns = ["Care_Plan", "Count"]
+    care_counts["Care_Plan"] = care_counts["Care_Plan"].str.replace("^Care_", "", regex=True)
+
+    # --- Filtrado por mínimo o top N ---
+    care_counts = care_counts[care_counts["Count"] >= min_count]
+    care_counts = care_counts.sort_values("Count", ascending=False)
+    if top_n is not None:
+        care_counts = care_counts.head(top_n)
+
+    if care_counts.empty:
+        ax.text(0.5, 0.5, "Sin datos válidos", ha="center", va="center", transform=ax.transAxes)
+        if created:
+            fig.tight_layout()
+        return fig, ax
+
+    # --- Gráfico ---
+    palette = sns.color_palette("Blues", n_colors=len(care_counts))
+    bars = ax.barh(care_counts["Care_Plan"], care_counts["Count"], color=palette, edgecolor="black", alpha=0.8)
+    ax.invert_yaxis()
+
+    # Etiquetas sobre las barras
+    for bar in bars:
+        width = bar.get_width()
+        ax.text(width + max(care_counts["Count"]) * 0.01, bar.get_y() + bar.get_height() / 2,
+                f"{int(width)}", va="center", fontsize=9, weight="bold")
+
+    # --- Estilo limpio ---
+    ax.set_title(title, fontsize=13, weight="bold", pad=10)
+    ax.set_xlabel("Número de pacientes con registro (>0)")
+    ax.set_ylabel("Tipo de Care Plan")
+    ax.grid(False)
+
+    for spine in ["top", "right", "left", "bottom"]:
+        ax.spines[spine].set_visible(False)
+    ax.set_facecolor("white")
+
+    if created:
+        fig.tight_layout()
+    return fig, ax
+
+# -----------------------------
 # Helpers UI
 # -----------------------------
 
@@ -1218,7 +1296,7 @@ with st.sidebar:
         "Estancia media UCI (Hospital)",
         "Ethnicity",
         "Height",
-        "Zona UCI",
+        "Especialidad UCI",
     ]
     _selected = st.radio("Elige un gráfico", _viz_options, key="viz")
 
@@ -1263,6 +1341,16 @@ with st.sidebar:
         density_height = st.checkbox("Normalizar altura", value=False)
     with col_plot2:
         show_mean_height = st.checkbox("Mostrar media altura", value=False)
+
+    with st.sidebar:
+        top_n_care = st.number_input(
+            "Top N especialidades",
+            min_value=2,
+            max_value=6,
+            value=4,
+            step=1,
+            help="Número de especialidades a mostrar. (max 6)"
+        )
     
 # -----------------------------
 # Carga de datos
@@ -1284,6 +1372,7 @@ if "patient" not in dfs:
     st.stop()
 
 patient_raw = dfs["patient"]
+carPlan_raw = dfs["carePlanGoal"]
 df_patient = preprocess_patient(patient_raw)
 
 # ------ Página: Predicciones ------
@@ -1472,8 +1561,8 @@ elif _selected == "Ethnicity":
 elif _selected == "Height":
     fig, _ = plot_height_hist(df_patient, bins=40, density=density_height, show_mean=show_mean_height, clip=(120, 210))
     render_plot(fig, "altura_hist_kde")
-elif _selected == "Zona UCI":
-    fig, _ = plot_pie_hospital_admit_source(df_patient, top_n=top_n_zone)
-    render_plot(fig, "admission_pie")
+elif _selected == "Especialidad UCI":
+    fig, _ = plot_careplan_counts(carPlan_raw, top_n=top_n_care)
+    render_plot(fig, "careplan_counts")
 
 st.caption("Alejandro Cortijo Benito -- 2025 (alejandro.cortijo.benito@alumnos.upm.es)")
