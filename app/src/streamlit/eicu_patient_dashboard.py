@@ -1336,21 +1336,19 @@ with st.sidebar:
         horizontal=True,
     ) == "Sí"
 
-    col_plot1, col_plot2= st.columns(2)
+    col_plot1, col_plot2 = st.columns(2)
     with col_plot1:
-        density_height = st.checkbox("Normalizar altura", value=False)
+        density_height = st.toggle("Normalizar altura", value=False)
     with col_plot2:
-        show_mean_height = st.checkbox("Mostrar media altura", value=False)
+        show_mean_height = st.toggle("Media altura", value=False)
 
-    with st.sidebar:
-        top_n_care = st.number_input(
-            "Top N especialidades",
-            min_value=2,
-            max_value=6,
-            value=4,
-            step=1,
-            help="Número de especialidades a mostrar. (max 6)"
-        )
+    top_n_care = st.radio(
+        "Top N especialidades:",
+        options=[2, 3, 4, 5, 6],
+        index=2,
+        horizontal=True,
+        help="Número de especialidades a mostrar. (max 6)"
+    )
     
 # -----------------------------
 # Carga de datos
