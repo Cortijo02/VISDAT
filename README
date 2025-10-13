@@ -14,7 +14,7 @@
 │   ├── db
 │   │   ├── csv                           # Original data
 │   │   ├── csv_clean                     # Data cleaned
-│   │   ├── sqlite                        # Data base de datos
+│   │   ├── sqlite                        # Base de datos
 │   │   └── us-states.json                # GeoPandas
 │   └── src
 │       ├── Preliminar_plots.ipynb        # Primer barrido plots
@@ -27,4 +27,4 @@
 └── requirements.txt
 ```
 
-Recomiendo mirar el `data_cleaning_train.ipynb` para mirar la limpieza, y de cara a revisar los plots lo mejor es mirar el dashboard ya que `Preliminar_plots.ipynb` no es la versión final.
+Recomiendo mirar el `data_cleaning_train.ipynb` para mirar la limpieza, y de cara a revisar los plots lo mejor es mirar el dashboard de streamlit ya que `Preliminar_plots.ipynb` no es la versión final.
