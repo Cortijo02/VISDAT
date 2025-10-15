@@ -1405,7 +1405,7 @@ if st.session_state.get("_page") == "predicciones":
                             mae = mean_absolute_error(y_test, pred)
                             r2 = r2_score(y_test, pred)
                             st.write(f"**MAE test:** {mae:.4f} minutos")
-                            st.write(f"**R² test:** {r2:.4f} minutos")
+                            st.write(f"**R² test:** {r2:.4f}")
                         except Exception as e:
                             st.warning(f"No pude calcular métricas: {e}")
                     elif y_test is not None:
