@@ -1296,12 +1296,15 @@ with st.sidebar:
         "Estancia media UCI (Hospital)",
         "Ethnicity",
         "Height",
-        "Especialidad UCI",
+        "Especialidad UCI (Tratamiento)",
     ]
     _selected = st.radio("Elige un gráfico", _viz_options, key="viz")
 
     st.header("🎛️ Parámetros de gráficos")
-    bins_hist = st.slider("Bins histograma estacia media", 10, 150, 50, step=5)
+
+    st.markdown("**Estancia media UCI (Días)**", unsafe_allow_html=True)
+    
+    bins_hist = st.slider("Bins histograma:", 10, 150, 50, step=5)
 
     col_plot1, col_plot2, col_plot3 = st.columns(3)
     with col_plot1:
@@ -1311,9 +1314,11 @@ with st.sidebar:
     with col_plot3:
         median_hist = st.checkbox("Mediana", value=True)
 
+    st.markdown("**Admisión**", unsafe_allow_html=True)
+    
     with st.sidebar:
         top_n_zone = st.number_input(
-            "Top N zonas admisiones",
+            "Top N zonas admisiones:",
             min_value=2,
             max_value=8,
             value=5,
@@ -1321,26 +1326,34 @@ with st.sidebar:
             help="Número de zonas a mostrar en el pie. (max 8)"
         )
 
-    top_n = st.slider("Top N categorías admisiones", 3, 13, 8)
+    st.markdown("**Estancia media UCI (Edad)**", unsafe_allow_html=True)
 
-    cluster_n = st.slider("N clusters (Edad vs Estancia UCI)", 2, 5, 3) 
+    cluster_n = st.slider("N clusters", 2, 5, 3) 
     opcion = st.selectbox("Añadir tendencia:", ["Ninguna", "Mediana", "Media"], index=0)
     trendline = {"Ninguna": None, "Mediana": "median", "Media": "mean"}[opcion]
 
-    top_n_diag = st.slider("Top N categorías diagnosticos", 3, 10, 8)
+    st.markdown("**Estancia media UCI (Diagnosticos)**", unsafe_allow_html=True)
+
+    top_n_diag = st.slider("Top N categorías diagnosticos.", 3, 10, 8)
+
+    st.markdown("**Ethnicity**", unsafe_allow_html=True)
 
     showfliers_boxplot = st.radio(
-        "Mostrar valores atípicos en boxplots:",
+        "Mostrar valores atípicos en boxplots",
         ["No", "Sí"],
         index=0,
         horizontal=True,
     ) == "Sí"
+
+    st.markdown("**Height**", unsafe_allow_html=True)
 
     col_plot1, col_plot2 = st.columns(2)
     with col_plot1:
         density_height = st.toggle("Normalizar altura", value=False)
     with col_plot2:
         show_mean_height = st.toggle("Media altura", value=False)
+
+    st.markdown("**Especialidad UCI (Tratamiento)**", unsafe_allow_html=True)
 
     top_n_care = st.radio(
         "Top N especialidades:",
@@ -1563,7 +1576,7 @@ elif _selected == "Ethnicity":
 elif _selected == "Height":
     fig, _ = plot_height_hist(df_patient, bins=40, density=density_height, show_mean=show_mean_height, clip=(120, 210))
     render_plot(fig, "altura_hist_kde")
-elif _selected == "Especialidad UCI":
+elif _selected == "Especialidad UCI (Tratamiento)":
     fig, _ = plot_careplan_counts(carPlan_raw, top_n=top_n_care)
     render_plot(fig, "careplan_counts")
 
