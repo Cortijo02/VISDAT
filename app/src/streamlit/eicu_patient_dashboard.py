@@ -749,7 +749,7 @@ def plot_height_hist(
         mean_val = height_cm.mean()
         ax.axvline(mean_val, color="red", linestyle="--", linewidth=2, label=f"Media: {mean_val:.1f} cm")
 
-        x_offset = (height_cm.max() - height_cm.min()) * 0.02
+        x_offset = (height_cm.max() - height_cm.min()) * -0.02
         ymax = ax.get_ylim()[1]
 
         ax.text(
@@ -757,7 +757,7 @@ def plot_height_hist(
             ymax * 0.9,
             f"Media\n{mean_val:.1f} cm",
             color="red",
-            ha="left",
+            ha="right",
             va="center",
             fontsize=9,
             weight="bold",
