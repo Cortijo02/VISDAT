@@ -17,7 +17,6 @@
 │   │   ├── sqlite                        # Base de datos
 │   │   └── us-states.json                # GeoPandas
 │   └── src
-│       ├── Preliminar_plots.ipynb        # Primer barrido plots
 │       ├── data_cleaning_train.ipynb     # Script de limpieza
 │       ├── models                        # Pesos
 │       ├── streamlit                     # Código del dashboard
@@ -27,4 +26,4 @@
 └── requirements.txt
 ```
 
-Recomiendo mirar el `data_cleaning_train.ipynb` para mirar la limpieza, y de cara a revisar los plots lo mejor es mirar el dashboard de streamlit ya que `Preliminar_plots.ipynb` no es la versión final.
+Recomiendo mirar el `data_cleaning_train.ipynb` para mirar la limpieza y `train.ipynb` de cara a los entrenamientos. Para revisar los plots lo mejor es mirar el dashboard de streamlit.
