@@ -28,7 +28,6 @@ from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.cluster import KMeans
 
 from scipy.sparse import load_npz
-from sklearn.ensemble import VotingRegressor
 from sklearn.metrics import mean_absolute_error, r2_score
 import joblib
 
@@ -51,7 +50,6 @@ if "_page" not in st.session_state:
 if "viz" not in st.session_state:
     st.session_state["viz"] = "Resumen 3x3"
 
-
 # Paleta / estilo base matplot
 plt.style.use("default")
 
@@ -64,9 +62,6 @@ def read_csv_safe(path: str) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def load_tables(data_dir: str) -> Dict[str, pd.DataFrame]:
-    """Carga patient.csv y hospital.csv desde un directorio.
-    Si no existe hospital.csv, devuelve sólo patient.
-    """
     dfs: Dict[str, pd.DataFrame] = {}
     p_path = os.path.join(data_dir, "patient.csv")
     h_path = os.path.join(data_dir, "hospital.csv")
@@ -84,12 +79,6 @@ def load_tables(data_dir: str) -> Dict[str, pd.DataFrame]:
 @st.cache_data(show_spinner=False)
 def load_sparse_matrix(path: str):
     return load_npz(path)
-
-    if os.path.exists(p_path):
-        dfs["patient"] = read_csv_safe(p_path)
-    if os.path.exists(h_path):
-        dfs["hospital"] = read_csv_safe(h_path)
-    return dfs
 
 # ----------------
 # Utils 
@@ -143,12 +132,6 @@ def plot_hist_los(
     show_mean: bool = False,
     show_median: bool = False,
 ):
-    """
-    Histograma de estancia en UCI (días).
-    - line=True añade curva de densidad (tendencia)
-    - show_mean/median controlan si se muestran las líneas y anotaciones
-    - Leyenda adaptativa según los elementos visibles
-    """
     if "icu_los_days" not in df.columns:
         raise ValueError("Falta la columna 'icu_los_days'.")
 
@@ -227,7 +210,6 @@ def plot_hist_los(
             va="center",
         )
 
-    # Estilo visual limpio
     ax.set_title("Distribución de la estancia en UCI", fontsize=13, weight="bold", pad=10)
     ax.set_xlabel("Estancia (días)", fontsize=11)
     ax.tick_params(axis="both", which="major", labelsize=10)
@@ -361,13 +343,6 @@ def plot_scatter_age_los(
     ax=None,
     line: str = "median",  # "median" | "mean" | None
 ):
-    """
-    Scatter de edad (x) vs estancia en UCI (y) con:
-      - Clustering KMeans coloreado por cluster.
-      - Línea vertical en la mediana o media de edad.
-      - Líneas divisorias entre clusters y centroides marcados.
-      - Valor de la línea mostrado a la derecha.
-    """
     if not {"age_years", "icu_los_days"} <= set(df.columns):
         raise ValueError("Faltan columnas requeridas: 'age_years' y 'icu_los_days'.")
 
@@ -380,7 +355,6 @@ def plot_scatter_age_los(
 
     n_clusters = max(1, min(n_clusters, len(tmp)))
 
-    # --- KMeans ---
     km = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
     labels = km.fit_predict(tmp[["age_years", "icu_los_days"]].to_numpy())
     centers = km.cluster_centers_
@@ -392,11 +366,9 @@ def plot_scatter_age_los(
     else:
         fig = ax.figure
 
-    # --- Colores y símbolos ---
     palette = sns.color_palette("Set2", n_colors=n_clusters)
     roman_map = {1: "I", 2: "II", 3: "III", 4: "IV", 5: "V"}
 
-    # --- Dibujar regiones de cluster (contornos suaves) ---
     x_min, x_max = tmp["age_years"].min() - 2, tmp["age_years"].max() + 2
     y_min, y_max = tmp["icu_los_days"].min() - 1, tmp["icu_los_days"].max() + 1
 
@@ -407,11 +379,9 @@ def plot_scatter_age_los(
     Z = km.predict(np.c_[xx.ravel(), yy.ravel()])
     Z = Z.reshape(xx.shape)
 
-    # Fondo y líneas divisorias
     ax.contourf(xx, yy, Z, alpha=0.08, cmap="Set2", levels=n_clusters)
     ax.contour(xx, yy, Z, colors="gray", linewidths=0.8, linestyles="--", alpha=0.6)
 
-    # --- Puntos por cluster ---
     for k in range(n_clusters):
         sub = tmp[labels == k]
         ax.scatter(
@@ -424,7 +394,6 @@ def plot_scatter_age_los(
             zorder=2,
         )
 
-    # --- Centroides ---
     ax.scatter(
         centers[:, 0],
         centers[:, 1],
@@ -437,7 +406,6 @@ def plot_scatter_age_los(
         zorder=4,
     )
 
-    # --- Línea vertical (media o mediana) con valor ---
     if line in ("median", "mean"):
         xval = tmp["age_years"].median() if line == "median" else tmp["age_years"].mean()
         label_text = f"{'Mediana' if line == 'median' else 'Media'} edad"
@@ -450,7 +418,6 @@ def plot_scatter_age_los(
             zorder=3,
         )
 
-        # Mostrar el valor numérico a la derecha de la línea
         y_text = tmp["icu_los_days"].max() * 0.95  # altura relativa
         ax.text(
             xval + (tmp["age_years"].max() - tmp["age_years"].min()) * 0.01,  # leve desplazamiento a la derecha
@@ -466,7 +433,6 @@ def plot_scatter_age_los(
             zorder=5,
         )
 
-    # --- Estilo y formato ---
     ax.set_title("Edad vs estancia en UCI (clusters)", fontsize=13, weight="bold", pad=10)
     ax.set_xlabel("Edad (años)")
     ax.set_ylabel("Estancia UCI (días)")
@@ -480,10 +446,6 @@ def plot_scatter_age_los(
     return fig, ax
 
 def plot_violin_by_gender(df, ax=None, order=None):
-    """
-    Dibuja un violinplot de estancia en UCI por género, coloreando por 'gender'
-    con una paleta definida internamente.
-    """
     if "gender" not in df.columns or "icu_los_days" not in df.columns:
         raise ValueError("Faltan columnas requeridas: 'gender' y 'icu_los_days'.")
 
@@ -526,10 +488,6 @@ def plot_bar_mean_by_dx(
     ax=None,
     annotate: bool = True,
 ):
-    """
-    Muestra la estancia media en UCI por diagnóstico (apacheadmissiondx),
-    coloreando cada barra con un color distinto y sin cuadrícula.
-    """
     if "apacheadmissiondx" not in df.columns:
         raise ValueError("Falta la columna 'apacheadmissiondx'.")
 
@@ -541,7 +499,6 @@ def plot_bar_mean_by_dx(
             raise ValueError(f"Falta la columna de hue '{hue_col}'.")
         data[hue_col] = data[hue_col].fillna("Desconocido")
 
-    # Seleccionar top diagnósticos más frecuentes
     top_categories = (
         data["apacheadmissiondx"].value_counts().head(top_n).index.tolist()
     )
@@ -554,7 +511,6 @@ def plot_bar_mean_by_dx(
     else:
         fig = ax.figure
 
-    # Calcular estancia media y preparar DataFrame
     plot_df = (
         data.groupby("apacheadmissiondx", as_index=False)["icu_los_days"]
         .mean()
@@ -562,7 +518,6 @@ def plot_bar_mean_by_dx(
     )
     plot_df = plot_df.sort_values("mean_los", ascending=False)
 
-    # Dibujar barras
     sns.barplot(
         data=plot_df,
         x="apacheadmissiondx",
@@ -573,7 +528,6 @@ def plot_bar_mean_by_dx(
         ax=ax,
     )
 
-    # Estilo limpio (sin grid)
     ax.set_facecolor("white")
     ax.grid(False)
     for spine in ["top", "right"]:
@@ -581,13 +535,11 @@ def plot_bar_mean_by_dx(
     ax.spines["left"].set_alpha(0.6)
     ax.spines["bottom"].set_alpha(0.6)
 
-    # Títulos y ejes
     ax.set_title(f"Estancia media en UCI por diagnóstico (Top {top_n})", fontsize=13, weight="bold", pad=10)
     ax.set_xlabel("Diagnóstico de admisión", fontsize=11)
     ax.set_ylabel("Estancia media (días)", fontsize=11)
     plt.setp(ax.get_xticklabels(), rotation=25, ha="right")
 
-    # Anotaciones opcionales
     if annotate:
         try:
             for container in ax.containers:
@@ -640,12 +592,6 @@ def plot_box_los_by_ethnicity(
     colors: Optional[Dict[str, str]] = None,
     showfliers: bool = True,
 ):
-    """
-    Boxplot de estancia en UCI (icu_los_days) por etnia (ethnicity).
-    - Filtra a las 'top_n' etnias más frecuentes y descarta grupos con < min_count.
-    - Ordena las categorías por mediana de estancia (descendente).
-    - Colorea por categoría y añade leyenda consistente (sin recuadro).
-    """
     created = False
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 5))
@@ -798,7 +744,7 @@ def plot_height_hist(
         y_counts = y * len(height_cm) * bin_width
         line.set_ydata(y_counts)
 
-    # --- Línea y anotación de la media (opcional) ---
+    # --- Línea y anotación de la media ---
     if show_mean:
         mean_val = height_cm.mean()
         ax.axvline(mean_val, color="red", linestyle="--", linewidth=2, label=f"Media: {mean_val:.1f} cm")
@@ -861,12 +807,6 @@ def plot_pie_hospital_admit_source(
     title_y: float = 1.06,
     top_adjust: float = 0.88,
 ):
-    """
-    Pie chart de fuentes de admisión hospitalaria equilibrado visualmente.
-    - Las flechas parten del centro del pastel.
-    - Las etiquetas se superponen sobre las líneas.
-    - El ángulo se ajusta automáticamente para balancear lados.
-    """
     created = False
     if ax is None:
         fig, ax = plt.subplots(figsize=(9, 6))
@@ -887,7 +827,6 @@ def plot_pie_hospital_admit_source(
     pcts = (100.0 * vals / total) if total > 0 else np.zeros_like(vals, dtype=float)
 
     # === Ángulo de inicio balanceado ===
-    # Buscar el ángulo del sector más grande y colocarlo centrado abajo
     largest_idx = int(np.argmax(vals))
 
     cumulative = np.cumsum(vals) / total * 360
@@ -1041,17 +980,9 @@ def _norm(s: str) -> str:
     return s
 
 def plot_patients_by_region(df_patient_with_region: pd.DataFrame, ax=None, json_path: str = "/app/app/db/us-states.json"):
-    """
-    Mapa de EE.UU. mostrando pacientes por región (Northeast, South, West, Midwest, _Unknown).
-    - Usa un GeoJSON local (json_path).
-    - Colorea cada región y muestra porcentajes.
-    - Normaliza nombres (_Unkhown -> _Unknown).
-    """
-
     if "region" not in df_patient_with_region.columns:
         raise ValueError("El DataFrame no tiene la columna 'region'.")
 
-    # --- Normalizar nombres de región ---
     raw = df_patient_with_region["region"].astype(str).map(_norm).str.lower()
     mapping = {
         "_unknown": "_Unknown",
@@ -1066,7 +997,6 @@ def plot_patients_by_region(df_patient_with_region: pd.DataFrame, ax=None, json_
     df_patient_with_region = df_patient_with_region.copy()
     df_patient_with_region["region"] = raw.map(mapping).fillna("_Unknown")
 
-    # --- Contar pacientes por región ---
     counts = df_patient_with_region["region"].value_counts()
     total = int(counts.sum())
     percents = (100 * counts / total).round(1)
@@ -1074,7 +1004,6 @@ def plot_patients_by_region(df_patient_with_region: pd.DataFrame, ax=None, json_
     # --- Cargar el GeoJSON local ---
     states = gpd.read_file(json_path)
 
-    # --- Asignar regiones (basado en U.S. Census Bureau) ---
     northeast = {"Maine","New Hampshire","Vermont","Massachusetts","Rhode Island","Connecticut",
                  "New York","New Jersey","Pennsylvania"}
     midwest = {"Ohio","Indiana","Illinois","Michigan","Wisconsin",
@@ -1100,7 +1029,6 @@ def plot_patients_by_region(df_patient_with_region: pd.DataFrame, ax=None, json_
 
     states["region"] = states["name"].apply(assign_region)
 
-    # --- Paleta y orden de leyenda ---
     palette = {
         "Northeast": "#1f77b4",
         "Midwest": "#2ca02c",
@@ -1117,21 +1045,18 @@ def plot_patients_by_region(df_patient_with_region: pd.DataFrame, ax=None, json_
     else:
         fig = ax.figure
 
-    # --- Dibujar mapa ---
     for region in legend_order:
         color = palette[region]
         states[states["region"] == region].plot(
             ax=ax, color=color, edgecolor="white", linewidth=0.8, alpha=0.9
         )
 
-    # --- Título y estilo ---
     ax.set_title(
         "Distribución de pacientes por región de EE.UU.",
         fontsize=13, weight="bold", pad=10
     )
     ax.axis("off")
 
-    # --- Leyenda con colores + porcentaje ---
     legend_elements = []
     for region in legend_order:
         pct = float(percents.get(region, 0.0))
@@ -1162,15 +1087,6 @@ def plot_careplan_counts(
     min_count: int = 1,
     title: str = "Frecuencia de Planes de Cuidado (Care Plans)",
 ):
-    """
-    Gráfico de barras de frecuencia de aparición de Care Plans.
-    
-    - Cuenta cuántos pacientes tienen valor > 0 por tipo de Care Plan.
-    - Elimina el prefijo 'Care_' de los nombres de columna.
-    - Permite filtrar por mínimo conteo (min_count) o limitar a los top N.
-    - Devuelve fig, ax al estilo plot_height_hist.
-    """
-
     created = False
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 5))
@@ -1178,7 +1094,6 @@ def plot_careplan_counts(
     else:
         fig = ax.figure
 
-    # --- Validar columnas ---
     care_cols = [c for c in df.columns if c != "patientunitstayid"]
     if not care_cols:
         ax.text(0.5, 0.5, "Sin columnas válidas", ha="center", va="center", transform=ax.transAxes)
@@ -1186,12 +1101,10 @@ def plot_careplan_counts(
             fig.tight_layout()
         return fig, ax
 
-    # --- Calcular conteos ---
     care_counts = (df[care_cols] > 0).sum().reset_index()
     care_counts.columns = ["Care_Plan", "Count"]
     care_counts["Care_Plan"] = care_counts["Care_Plan"].str.replace("^Care_", "", regex=True)
 
-    # --- Filtrado por mínimo o top N ---
     care_counts = care_counts[care_counts["Count"] >= min_count]
     care_counts = care_counts.sort_values("Count", ascending=False)
     if top_n is not None:
@@ -1203,18 +1116,15 @@ def plot_careplan_counts(
             fig.tight_layout()
         return fig, ax
 
-    # --- Gráfico ---
     palette = sns.color_palette("Blues", n_colors=len(care_counts))
     bars = ax.barh(care_counts["Care_Plan"], care_counts["Count"], color=palette, edgecolor="black", alpha=0.8)
     ax.invert_yaxis()
 
-    # Etiquetas sobre las barras
     for bar in bars:
         width = bar.get_width()
         ax.text(width + max(care_counts["Count"]) * 0.01, bar.get_y() + bar.get_height() / 2,
                 f"{int(width)}", va="center", fontsize=9, weight="bold")
 
-    # --- Estilo limpio ---
     ax.set_title(title, fontsize=13, weight="bold", pad=10)
     ax.set_xlabel("Número de pacientes con registro (>0)")
     ax.set_ylabel("Tipo de Care Plan")
@@ -1232,10 +1142,6 @@ def plot_careplan_counts(
 # Helpers UI
 # -----------------------------
 
-@st.cache_data(show_spinner=False)
-def load_sparse_matrix(path: str):
-    return load_npz(path)
-
 @st.cache_resource(show_spinner=False)
 def find_model_file(models_dir: str, name_hints: list[str], exts=(".joblib", ".pkl", ".json", ".bin", ".ubj")) -> str | None:
     if not os.path.isdir(models_dir):
@@ -1248,7 +1154,7 @@ def find_model_file(models_dir: str, name_hints: list[str], exts=(".joblib", ".p
                 continue
             if any(h in lf for h in name_hints):
                 cand.append(os.path.join(root, f))
-    # prioriza joblib/pkl sobre json/bin
+
     pref = sorted(cand, key=lambda p: (0 if os.path.splitext(p)[1] in (".joblib", ".pkl") else 1, len(p)))
     return pref[0] if pref else None
 
@@ -1442,7 +1348,7 @@ if st.session_state.get("_page") == "predicciones":
             idx = st.number_input("Selecciona una fila (0-index) del conjunto de test para hacer inferencia", min_value=0, max_value=max(0, len(df_xtest)-1), value=0, step=1)
 
         with st.expander("🔎 Vista rápida de X_test.csv"):
-            st.dataframe(df_xtest.head(50), use_container_width=True)
+            st.dataframe(df_xtest, use_container_width=True)
 
     y_test = None
     if path_ytest and os.path.exists(path_ytest):
@@ -1517,7 +1423,7 @@ if st.session_state.get("_page") == "predicciones":
 
     st.stop()
 
-# KPI rápidos
+# Estadísticas rápidas
 c1, c2, c3, c4 = st.columns(4)
 with c1:
     st.metric("Pacientes", value=f"{len(df_patient):,}".replace(",", "."))
@@ -1526,7 +1432,7 @@ with c2:
 with c3:
     st.metric("Mediana estancia en UCI", value=f"{df_patient['icu_los_days'].median():.1f} días")
 
-# Datos (opcional)
+# Datos
 with st.expander("🔎 Ver primeras filas de patient"):
     st.dataframe(df_patient.head(50), use_container_width=True)
 
