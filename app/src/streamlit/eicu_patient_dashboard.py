@@ -1004,6 +1004,7 @@ def plot_patients_by_region(df_patient_with_region: pd.DataFrame, ax=None, json_
     # --- Cargar el GeoJSON local ---
     states = gpd.read_file(json_path)
 
+    # División por regiones de lla Oficina del Censo de los Estados Unidos (U.S. Census Bureau).
     northeast = {"Maine","New Hampshire","Vermont","Massachusetts","Rhode Island","Connecticut",
                  "New York","New Jersey","Pennsylvania"}
     midwest = {"Ohio","Indiana","Illinois","Michigan","Wisconsin",
