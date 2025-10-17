@@ -1,6 +1,5 @@
 FROM python:3.11
 
-# Evitar pyc y buffering de stdout
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
@@ -26,7 +25,3 @@ RUN pip install --upgrade pip setuptools wheel \
 COPY . /app
 
 CMD ["sleep", "infinity"]
-# CMD ["jupyter", "notebook", "--ip=0.0.0.0", "--port=8501", "--no-browser", "--allow-root", "--NotebookApp.token=''", "--NotebookApp.password=''"]
-
-# jupyter notebook --ip=0.0.0.0 --port=8501 --no-browser --allow-root --NotebookApp.token='' --NotebookApp.password=''
-# streamlit run app/src/streamlit/eicu_patient_dashboard.py
