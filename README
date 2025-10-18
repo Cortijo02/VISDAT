@@ -27,3 +27,5 @@
 ```
 
 Recomiendo mirar el `data_cleaning_train.ipynb` para mirar la limpieza y `train.ipynb` de cara a los entrenamientos. Para revisar los plots lo mejor es mirar el dashboard de streamlit.
+
+En el caso de querer ejecutar el `data_cleaning_train.ipynb` hay que asegurarse de que todos los zips correspondientes a los CSVs estén descomprimidos en la carpeta `app/db/csv` y que el `.sqlite3` también lo este.
